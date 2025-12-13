@@ -11,8 +11,28 @@ A Go-based LDAP proxy with integrated caching to offload OpenLDAP servers.
 
 ## Installation
 
+### From source
+
 ```bash
+# Clone the repository
+git clone https://github.com/mgarbin/go-ldap-proxy-cache.git
+cd go-ldap-proxy-cache
+
+# Build using Make
+make build
+
+# Or build directly with Go
 go build -o ldap-proxy
+```
+
+### Using Docker
+
+```bash
+# Build the Docker image
+docker build -t ldap-proxy .
+
+# Run with Docker
+docker run -p 3389:3389 ldap-proxy -ldap-server ldap.example.com:389
 ```
 
 ## Usage
