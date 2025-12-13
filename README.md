@@ -59,7 +59,7 @@ This ensures that identical queries return cached results while different querie
 
 ## Requirements
 
-- Go 1.21 or higher
+- Go 1.23 or higher
 - Access to an LDAP server
 
 ## Dependencies

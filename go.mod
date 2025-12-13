@@ -1,6 +1,8 @@
 module github.com/mgarbin/go-ldap-proxy-cache
 
-go 1.24.11
+go 1.23.0
+
+toolchain go1.24.11
 
 require (
 	github.com/go-asn1-ber/asn1-ber v1.5.8-0.20250403174932-29230038a667

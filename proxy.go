@@ -93,7 +93,8 @@ func (p *LDAPProxy) handleRequest(state *ClientState, packet *ber.Packet) error 
 	case ldap.ApplicationUnbindRequest:
 		return p.handleUnbind(state)
 	default:
-		return p.forwardRequest(state, packet)
+		log.Printf("Unsupported LDAP operation: tag %d", protocolOp.Tag)
+		return fmt.Errorf("unsupported operation")
 	}
 }
 
@@ -308,25 +309,4 @@ func (p *LDAPProxy) sendSearchDone(state *ClientState, messageID int64, resultCo
 func (p *LDAPProxy) handleUnbind(state *ClientState) error {
 	log.Printf("Unbind request received")
 	return io.EOF
-}
-
-func (p *LDAPProxy) forwardRequest(state *ClientState, packet *ber.Packet) error {
-	ldapConn, err := ldap.Dial("tcp", p.config.LDAPServer)
-	if err != nil {
-		return err
-	}
-	defer ldapConn.Close()
-
-	state.mu.Lock()
-	bindDN := state.backendDN
-	bindPwd := state.backendPwd
-	state.mu.Unlock()
-
-	if bindDN != "" {
-		if err := ldapConn.Bind(bindDN, bindPwd); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }

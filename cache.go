@@ -57,6 +57,8 @@ func (c *Cache) generateKey(baseDN, filter string, attributes []string, scope in
 		Scope:      scope,
 	}
 
+	// json.Marshal is safe to use here as we're only marshaling simple types
+	// (strings, slices of strings, and int) which cannot fail
 	jsonData, _ := json.Marshal(data)
 	hash := sha256.Sum256(jsonData)
 	return hex.EncodeToString(hash[:])
