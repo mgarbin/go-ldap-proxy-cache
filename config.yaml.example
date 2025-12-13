@@ -4,6 +4,10 @@
 proxy_addr: ":3389"
 
 # Backend LDAP server address (default: localhost:389)
+# You can specify just the host:port (defaults to ldap://) or include the protocol:
+#   - ldap://localhost:389   (unencrypted LDAP)
+#   - ldaps://localhost:636  (LDAP over TLS/SSL)
+#   - localhost:389          (defaults to ldap://localhost:389)
 ldap_server: "localhost:389"
 
 # Cache TTL duration (default: 15m)

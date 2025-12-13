@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +40,19 @@ func NewLDAPProxy(config *Config) *LDAPProxy {
 		config: config,
 		cache:  NewCache(config.CacheTTL),
 	}
+}
+
+// ensureLDAPURL ensures that the server address has an LDAP protocol prefix.
+// If the address already has ldap://, ldaps://, ldapi://, or cldap://, it's returned as-is.
+// Otherwise, ldap:// is prepended for backward compatibility.
+func ensureLDAPURL(server string) string {
+	if strings.HasPrefix(server, "ldap://") ||
+		strings.HasPrefix(server, "ldaps://") ||
+		strings.HasPrefix(server, "ldapi://") ||
+		strings.HasPrefix(server, "cldap://") {
+		return server
+	}
+	return "ldap://" + server
 }
 
 func (p *LDAPProxy) Start() error {
@@ -147,7 +161,7 @@ func (p *LDAPProxy) handleBind(state *ClientState, messageID int64, bindReq *ber
 	dialer := &net.Dialer{
 		Timeout: p.config.ConnectionTimeout,
 	}
-	ldapConn, err := ldap.DialURL("ldap://"+p.config.LDAPServer, ldap.DialWithDialer(dialer))
+	ldapConn, err := ldap.DialURL(ensureLDAPURL(p.config.LDAPServer), ldap.DialWithDialer(dialer))
 	if err != nil {
 		log.Printf("Failed to connect to backend: %v", err)
 		return p.sendBindResponse(state, messageID, ldap.LDAPResultUnavailable)
@@ -226,7 +240,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	dialer := &net.Dialer{
 		Timeout: p.config.ConnectionTimeout,
 	}
-	ldapConn, err := ldap.DialURL("ldap://"+p.config.LDAPServer, ldap.DialWithDialer(dialer))
+	ldapConn, err := ldap.DialURL(ensureLDAPURL(p.config.LDAPServer), ldap.DialWithDialer(dialer))
 	if err != nil {
 		log.Printf("Failed to connect to backend: %v", err)
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultUnavailable)
