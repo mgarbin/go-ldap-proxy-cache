@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
 	"github.com/go-ldap/ldap/v3"
@@ -41,6 +42,9 @@ func (p *LDAPProxy) Start() error {
 	log.Printf("Forwarding to LDAP server: %s", p.config.LDAPServer)
 	log.Printf("Cache TTL: %s", p.config.CacheTTL)
 
+	// Start cache statistics reporter
+	go p.reportCacheStats()
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -49,6 +53,21 @@ func (p *LDAPProxy) Start() error {
 		}
 
 		go p.handleConnection(conn)
+	}
+}
+
+func (p *LDAPProxy) reportCacheStats() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		hits, misses, size := p.cache.Stats()
+		total := hits + misses
+		hitRate := float64(0)
+		if total > 0 {
+			hitRate = float64(hits) / float64(total) * 100
+		}
+		log.Printf("Cache stats: hits=%d, misses=%d, hit_rate=%.2f%%, entries=%d", hits, misses, hitRate, size)
 	}
 }
 

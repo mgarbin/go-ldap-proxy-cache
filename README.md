@@ -37,6 +37,20 @@ Start the proxy on port 3389, connecting to an LDAP server at ldap.example.com:3
 ./ldap-proxy -proxy-addr :3389 -ldap-server ldap.example.com:389 -cache-ttl 15m
 ```
 
+### Testing with ldapsearch
+
+Once the proxy is running, you can test it with standard LDAP tools like `ldapsearch`:
+
+```bash
+# Search through the proxy
+ldapsearch -H ldap://localhost:3389 -x -D "cn=admin,dc=example,dc=com" -w password \
+  -b "dc=example,dc=com" "(objectClass=*)"
+
+# Second identical search will be served from cache (much faster)
+ldapsearch -H ldap://localhost:3389 -x -D "cn=admin,dc=example,dc=com" -w password \
+  -b "dc=example,dc=com" "(objectClass=*)"
+```
+
 ## How It Works
 
 1. The proxy listens for LDAP client connections on the specified port

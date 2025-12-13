@@ -25,10 +25,28 @@ func TestCache(t *testing.T) {
 		t.Errorf("Expected %v, got %v", data, result)
 	}
 
+	// Test cache statistics
+	hits, misses, size := cache.Stats()
+	if hits != 1 {
+		t.Errorf("Expected 1 hit, got %d", hits)
+	}
+	if misses != 0 {
+		t.Errorf("Expected 0 misses, got %d", misses)
+	}
+	if size != 1 {
+		t.Errorf("Expected 1 entry, got %d", size)
+	}
+
 	// Test cache miss
 	_, found = cache.Get("dc=other,dc=com", filter, attributes, scope)
 	if found {
 		t.Error("Expected cache miss for different baseDN")
+	}
+
+	// Verify miss was counted
+	hits, misses, _ = cache.Stats()
+	if misses != 1 {
+		t.Errorf("Expected 1 miss after cache miss, got %d", misses)
 	}
 
 	// Test cache expiration
@@ -36,6 +54,12 @@ func TestCache(t *testing.T) {
 	_, found = cache.Get(baseDN, filter, attributes, scope)
 	if found {
 		t.Error("Expected cache entry to be expired")
+	}
+
+	// Verify expired entry counts as miss
+	hits, misses, _ = cache.Stats()
+	if misses != 2 {
+		t.Errorf("Expected 2 misses after expiration, got %d", misses)
 	}
 }
 

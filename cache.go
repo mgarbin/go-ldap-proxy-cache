@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"sync"
 	"time"
 )
@@ -17,6 +18,8 @@ type Cache struct {
 	mu      sync.RWMutex
 	entries map[string]*CacheEntry
 	ttl     time.Duration
+	hits    uint64
+	misses  uint64
 }
 
 func NewCache(ttl time.Duration) *Cache {
@@ -35,12 +38,17 @@ func (c *Cache) cleanup() {
 	for range ticker.C {
 		c.mu.Lock()
 		now := time.Now()
+		cleaned := 0
 		for key, entry := range c.entries {
 			if now.After(entry.ExpiresAt) {
 				delete(c.entries, key)
+				cleaned++
 			}
 		}
 		c.mu.Unlock()
+		if cleaned > 0 {
+			log.Printf("Cache cleanup: removed %d expired entries", cleaned)
+		}
 	}
 }
 
@@ -72,13 +80,16 @@ func (c *Cache) Get(baseDN, filter string, attributes []string, scope int) (inte
 
 	entry, exists := c.entries[key]
 	if !exists {
+		c.misses++
 		return nil, false
 	}
 
 	if time.Now().After(entry.ExpiresAt) {
+		c.misses++
 		return nil, false
 	}
 
+	c.hits++
 	return entry.Data, true
 }
 
@@ -92,4 +103,10 @@ func (c *Cache) Set(baseDN, filter string, attributes []string, scope int, data 
 		Data:      data,
 		ExpiresAt: time.Now().Add(c.ttl),
 	}
+}
+
+func (c *Cache) Stats() (hits, misses uint64, size int) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.hits, c.misses, len(c.entries)
 }
