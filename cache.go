@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -76,20 +77,20 @@ func (c *Cache) Get(baseDN, filter string, attributes []string, scope int) (inte
 	key := c.generateKey(baseDN, filter, attributes, scope)
 
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	entry, exists := c.entries[key]
+	c.mu.RUnlock()
+
 	if !exists {
-		c.misses++
+		atomic.AddUint64(&c.misses, 1)
 		return nil, false
 	}
 
 	if time.Now().After(entry.ExpiresAt) {
-		c.misses++
+		atomic.AddUint64(&c.misses, 1)
 		return nil, false
 	}
 
-	c.hits++
+	atomic.AddUint64(&c.hits, 1)
 	return entry.Data, true
 }
 
@@ -107,6 +108,10 @@ func (c *Cache) Set(baseDN, filter string, attributes []string, scope int, data 
 
 func (c *Cache) Stats() (hits, misses uint64, size int) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.hits, c.misses, len(c.entries)
+	size = len(c.entries)
+	c.mu.RUnlock()
+
+	hits = atomic.LoadUint64(&c.hits)
+	misses = atomic.LoadUint64(&c.misses)
+	return
 }

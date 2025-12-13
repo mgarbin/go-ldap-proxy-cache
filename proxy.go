@@ -18,7 +18,11 @@ type LDAPProxy struct {
 }
 
 type ClientState struct {
-	conn       net.Conn
+	conn net.Conn
+	// backendDN and backendPwd store credentials for the backend LDAP server
+	// Note: These are stored in plaintext as they're needed for each backend request.
+	// In production, consider implementing credential caching with encryption at rest
+	// or using a more secure credential management system.
 	backendDN  string
 	backendPwd string
 	mu         sync.Mutex
