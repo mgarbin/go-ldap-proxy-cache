@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"testing"
 	"time"
 )
@@ -93,9 +94,11 @@ func TestCacheKeyGeneration(t *testing.T) {
 
 func TestConfig(t *testing.T) {
 	config := &Config{
-		ProxyAddr:  ":3389",
-		LDAPServer: "localhost:389",
-		CacheTTL:   15 * time.Minute,
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
 	}
 
 	if config.ProxyAddr != ":3389" {
@@ -108,5 +111,122 @@ func TestConfig(t *testing.T) {
 
 	if config.CacheTTL != 15*time.Minute {
 		t.Errorf("Expected cache TTL 15m, got %v", config.CacheTTL)
+	}
+
+	if config.ConnectionTimeout != 10*time.Second {
+		t.Errorf("Expected connection timeout 10s, got %v", config.ConnectionTimeout)
+	}
+
+	if config.ClientTimeout != 30*time.Second {
+		t.Errorf("Expected client timeout 30s, got %v", config.ClientTimeout)
+	}
+}
+
+func TestYAMLConfig(t *testing.T) {
+	// Create a temporary YAML config file
+	yamlContent := `proxy_addr: ":4389"
+ldap_server: "ldap.test.com:389"
+cache_ttl: 30m
+connection_timeout: 15s
+client_timeout: 45s
+`
+
+	tmpFile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.Write([]byte(yamlContent)); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	// Test loading YAML config
+	config := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+	}
+
+	err = loadYAMLConfig(tmpFile.Name(), config)
+	if err != nil {
+		t.Fatalf("Failed to load YAML config: %v", err)
+	}
+
+	if config.ProxyAddr != ":4389" {
+		t.Errorf("Expected proxy addr :4389, got %s", config.ProxyAddr)
+	}
+
+	if config.LDAPServer != "ldap.test.com:389" {
+		t.Errorf("Expected LDAP server ldap.test.com:389, got %s", config.LDAPServer)
+	}
+
+	if config.CacheTTL != 30*time.Minute {
+		t.Errorf("Expected cache TTL 30m, got %v", config.CacheTTL)
+	}
+
+	if config.ConnectionTimeout != 15*time.Second {
+		t.Errorf("Expected connection timeout 15s, got %v", config.ConnectionTimeout)
+	}
+
+	if config.ClientTimeout != 45*time.Second {
+		t.Errorf("Expected client timeout 45s, got %v", config.ClientTimeout)
+	}
+}
+
+func TestYAMLConfigPartial(t *testing.T) {
+	// Test that partial YAML config doesn't override defaults
+	yamlContent := `proxy_addr: ":4389"
+ldap_server: "ldap.test.com:389"
+`
+
+	tmpFile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.Write([]byte(yamlContent)); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	// Test loading partial YAML config
+	config := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+	}
+
+	err = loadYAMLConfig(tmpFile.Name(), config)
+	if err != nil {
+		t.Fatalf("Failed to load YAML config: %v", err)
+	}
+
+	// These should be overridden by YAML
+	if config.ProxyAddr != ":4389" {
+		t.Errorf("Expected proxy addr :4389, got %s", config.ProxyAddr)
+	}
+
+	if config.LDAPServer != "ldap.test.com:389" {
+		t.Errorf("Expected LDAP server ldap.test.com:389, got %s", config.LDAPServer)
+	}
+
+	// These should keep their default values (not in YAML)
+	if config.CacheTTL != 15*time.Minute {
+		t.Errorf("Expected cache TTL 15m (default), got %v", config.CacheTTL)
+	}
+
+	if config.ConnectionTimeout != 10*time.Second {
+		t.Errorf("Expected connection timeout 10s (default), got %v", config.ConnectionTimeout)
+	}
+
+	if config.ClientTimeout != 30*time.Second {
+		t.Errorf("Expected client timeout 30s (default), got %v", config.ClientTimeout)
 	}
 }

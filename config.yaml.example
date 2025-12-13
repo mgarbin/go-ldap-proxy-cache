@@ -1,0 +1,28 @@
+# Example YAML configuration file for go-ldap-proxy-cache
+
+# Proxy listen address (default: :3389)
+proxy_addr: ":3389"
+
+# Backend LDAP server address (default: localhost:389)
+ldap_server: "localhost:389"
+
+# Cache TTL duration (default: 15m)
+# Examples: 15m, 1h, 30m, 2h30m
+cache_ttl: 15m
+
+# Backend connection timeout (default: 10s)
+# Time to wait for backend LDAP server connection
+connection_timeout: 10s
+
+# Client timeout (default: 30s)
+# Time to wait for client operations
+client_timeout: 30s
+
+# Example usage:
+# ./ldap-proxy -config config.yaml
+#
+# Note: You can also override any YAML setting with command-line flags:
+# ./ldap-proxy -config config.yaml -proxy-addr :3390
+#
+# When using a config file, all command-line flags become optional.
+# CLI flags will override values from the YAML config file.

@@ -37,22 +37,60 @@ docker run -p 3389:3389 ldap-proxy -ldap-server ldap.example.com:389
 
 ## Usage
 
+### Command Line
+
 ```bash
 ./ldap-proxy [options]
 ```
 
 ### Options
 
+- `-config`: Path to YAML configuration file (optional)
 - `-proxy-addr`: Proxy listen address (default: `:3389`)
 - `-ldap-server`: Backend LDAP server address (default: `localhost:389`)
 - `-cache-ttl`: Cache TTL duration (default: `15m`)
+- `-connection-timeout`: Backend connection timeout (default: `10s`)
+- `-client-timeout`: Client connection timeout (default: `30s`)
+
+### Configuration File
+
+You can use a YAML configuration file instead of command-line flags:
+
+```yaml
+# config.yaml
+proxy_addr: ":3389"
+ldap_server: "localhost:389"
+cache_ttl: 15m
+connection_timeout: 10s
+client_timeout: 30s
+```
+
+Then run:
+
+```bash
+./ldap-proxy -config config.yaml
+```
+
+**Note:** When using a YAML config file, all command-line flags are optional. CLI flags will override values from the YAML file if both are specified.
 
 ### Example
 
-Start the proxy on port 3389, connecting to an LDAP server at ldap.example.com:389 with a 15-minute cache:
+Start the proxy using CLI flags:
 
 ```bash
 ./ldap-proxy -proxy-addr :3389 -ldap-server ldap.example.com:389 -cache-ttl 15m
+```
+
+Or using a YAML config file:
+
+```bash
+./ldap-proxy -config config.yaml
+```
+
+Or mix both (CLI flags override YAML):
+
+```bash
+./ldap-proxy -config config.yaml -proxy-addr :3390
 ```
 
 ### Testing with ldapsearch
