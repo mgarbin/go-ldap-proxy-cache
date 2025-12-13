@@ -86,6 +86,10 @@ func (c *Cache) Get(baseDN, filter string, attributes []string, scope int) (inte
 	}
 
 	if time.Now().After(entry.ExpiresAt) {
+		// Remove expired entry immediately to prevent memory leaks
+		c.mu.Lock()
+		delete(c.entries, key)
+		c.mu.Unlock()
 		atomic.AddUint64(&c.misses, 1)
 		return nil, false
 	}

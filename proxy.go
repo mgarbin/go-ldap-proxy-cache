@@ -274,19 +274,21 @@ func (p *LDAPProxy) searchBackendWithPaging(conn *ldap.Conn, baseDN string, scop
 
 		allEntries = append(allEntries, result.Entries...)
 
+		// Check if there are more pages to fetch
 		pagingResult := ldap.FindControl(result.Controls, ldap.ControlTypePaging)
 		if pagingResult == nil {
 			break
 		}
 
-		pagingControl, ok := pagingResult.(*ldap.ControlPaging)
-		if !ok || len(pagingControl.Cookie) == 0 {
+		currentPaging, ok := pagingResult.(*ldap.ControlPaging)
+		if !ok || len(currentPaging.Cookie) == 0 {
 			break
 		}
 
-		nextPaging := ldap.NewControlPaging(ldapPageSize)
-		nextPaging.SetCookie(pagingControl.Cookie)
-		searchRequest.Controls = []ldap.Control{nextPaging}
+		// Set up the next page request with the cookie from the current page
+		nextPageControl := ldap.NewControlPaging(ldapPageSize)
+		nextPageControl.SetCookie(currentPaging.Cookie)
+		searchRequest.Controls = []ldap.Control{nextPageControl}
 	}
 
 	log.Printf("Retrieved %d entries from backend", len(allEntries))
