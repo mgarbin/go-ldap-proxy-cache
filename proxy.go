@@ -91,6 +91,11 @@ func (p *LDAPProxy) handleConnection(clientConn net.Conn) {
 	}
 
 	for {
+		// Set deadline before blocking read operation
+		if p.config.ClientTimeout > 0 {
+			clientConn.SetDeadline(time.Now().Add(p.config.ClientTimeout))
+		}
+
 		packet, err := ber.ReadPacket(clientConn)
 		if err != nil {
 			if err != io.EOF {
@@ -138,7 +143,11 @@ func (p *LDAPProxy) handleBind(state *ClientState, messageID int64, bindReq *ber
 
 	log.Printf("Bind request: version=%d, name=%s", version, name)
 
-	ldapConn, err := ldap.Dial("tcp", p.config.LDAPServer)
+	// Create dialer with timeout
+	dialer := &net.Dialer{
+		Timeout: p.config.ConnectionTimeout,
+	}
+	ldapConn, err := ldap.DialURL("ldap://"+p.config.LDAPServer, ldap.DialWithDialer(dialer))
 	if err != nil {
 		log.Printf("Failed to connect to backend: %v", err)
 		return p.sendBindResponse(state, messageID, ldap.LDAPResultUnavailable)
@@ -213,7 +222,11 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 
 	log.Printf("Cache miss - querying backend")
 
-	ldapConn, err := ldap.Dial("tcp", p.config.LDAPServer)
+	// Create dialer with timeout
+	dialer := &net.Dialer{
+		Timeout: p.config.ConnectionTimeout,
+	}
+	ldapConn, err := ldap.DialURL("ldap://"+p.config.LDAPServer, ldap.DialWithDialer(dialer))
 	if err != nil {
 		log.Printf("Failed to connect to backend: %v", err)
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultUnavailable)
