@@ -230,3 +230,56 @@ ldap_server: "ldap.test.com:389"
 		t.Errorf("Expected client timeout 30s (default), got %v", config.ClientTimeout)
 	}
 }
+
+func TestEnsureLDAPURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Plain hostname with port",
+			input:    "localhost:389",
+			expected: "ldap://localhost:389",
+		},
+		{
+			name:     "Already has ldap:// prefix",
+			input:    "ldap://localhost:389",
+			expected: "ldap://localhost:389",
+		},
+		{
+			name:     "Has ldaps:// prefix",
+			input:    "ldaps://secure.example.com:636",
+			expected: "ldaps://secure.example.com:636",
+		},
+		{
+			name:     "Has ldapi:// prefix",
+			input:    "ldapi:///var/run/slapd/ldapi",
+			expected: "ldapi:///var/run/slapd/ldapi",
+		},
+		{
+			name:     "Has cldap:// prefix",
+			input:    "cldap://ad.example.com:389",
+			expected: "cldap://ad.example.com:389",
+		},
+		{
+			name:     "Plain hostname without port",
+			input:    "ldap.example.com",
+			expected: "ldap://ldap.example.com",
+		},
+		{
+			name:     "IP address with port",
+			input:    "192.168.1.1:389",
+			expected: "ldap://192.168.1.1:389",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ensureLDAPURL(tt.input)
+			if result != tt.expected {
+				t.Errorf("ensureLDAPURL(%q) = %q, expected %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
