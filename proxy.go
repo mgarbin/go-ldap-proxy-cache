@@ -86,17 +86,12 @@ func (p *LDAPProxy) handleConnection(clientConn net.Conn) {
 
 	log.Printf("New connection from %s", clientConn.RemoteAddr())
 
-	// Set client timeout
-	if p.config.ClientTimeout > 0 {
-		clientConn.SetDeadline(time.Now().Add(p.config.ClientTimeout))
-	}
-
 	state := &ClientState{
 		conn: clientConn,
 	}
 
 	for {
-		// Extend deadline for each operation
+		// Set deadline before blocking read operation
 		if p.config.ClientTimeout > 0 {
 			clientConn.SetDeadline(time.Now().Add(p.config.ClientTimeout))
 		}

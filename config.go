@@ -18,15 +18,6 @@ type Config struct {
 }
 
 func LoadConfig() *Config {
-	// Set defaults
-	defaults := &Config{
-		ProxyAddr:         ":3389",
-		LDAPServer:        "localhost:389",
-		CacheTTL:          15 * time.Minute,
-		ConnectionTimeout: 10 * time.Second,
-		ClientTimeout:     30 * time.Second,
-	}
-
 	var configFile string
 	var proxyAddr string
 	var ldapServer string
@@ -45,11 +36,11 @@ func LoadConfig() *Config {
 
 	// Start with defaults
 	config := &Config{
-		ProxyAddr:         defaults.ProxyAddr,
-		LDAPServer:        defaults.LDAPServer,
-		CacheTTL:          defaults.CacheTTL,
-		ConnectionTimeout: defaults.ConnectionTimeout,
-		ClientTimeout:     defaults.ClientTimeout,
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
 	}
 
 	// Load YAML config if provided (overwrites defaults)
