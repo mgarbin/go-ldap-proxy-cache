@@ -11,19 +11,8 @@
 # Examples: 15m, 1h, 30m, 2h30m
 # -cache-ttl 15m
 
-# LDAP bind DN (optional, for authenticated backend connections)
-# -bind-dn "cn=admin,dc=example,dc=com"
-
-# LDAP bind password (optional)
-# -bind-pass "password"
-
 # Example usage:
 # ./ldap-proxy -proxy-addr :3389 -ldap-server ldap.example.com:389 -cache-ttl 15m
 
-# Or with authentication:
-# ./ldap-proxy \
-#   -proxy-addr :3389 \
-#   -ldap-server ldap.example.com:389 \
-#   -cache-ttl 15m \
-#   -bind-dn "cn=admin,dc=example,dc=com" \
-#   -bind-pass "secretpassword"
+# Note: The proxy acts as a transparent proxy, forwarding client credentials
+# to the backend LDAP server. Clients should authenticate directly through the proxy.

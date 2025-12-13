@@ -46,8 +46,6 @@ docker run -p 3389:3389 ldap-proxy -ldap-server ldap.example.com:389
 - `-proxy-addr`: Proxy listen address (default: `:3389`)
 - `-ldap-server`: Backend LDAP server address (default: `localhost:389`)
 - `-cache-ttl`: Cache TTL duration (default: `15m`)
-- `-bind-dn`: LDAP bind DN (optional)
-- `-bind-pass`: LDAP bind password (optional)
 
 ### Example
 
