@@ -12,6 +12,12 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
+const (
+	// ldapPageSize defines the number of entries to fetch per page when handling
+	// paginated LDAP responses from the backend server
+	ldapPageSize = 1000
+)
+
 type LDAPProxy struct {
 	config *Config
 	cache  *Cache
@@ -246,7 +252,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 func (p *LDAPProxy) searchBackendWithPaging(conn *ldap.Conn, baseDN string, scope int, filter string, attributes []string) ([]*ldap.Entry, error) {
 	var allEntries []*ldap.Entry
 
-	pagingControl := ldap.NewControlPaging(1000)
+	pagingControl := ldap.NewControlPaging(ldapPageSize)
 
 	searchRequest := ldap.NewSearchRequest(
 		baseDN,
@@ -278,7 +284,7 @@ func (p *LDAPProxy) searchBackendWithPaging(conn *ldap.Conn, baseDN string, scop
 			break
 		}
 
-		nextPaging := ldap.NewControlPaging(1000)
+		nextPaging := ldap.NewControlPaging(ldapPageSize)
 		nextPaging.SetCookie(pagingControl.Cookie)
 		searchRequest.Controls = []ldap.Control{nextPaging}
 	}
