@@ -152,10 +152,10 @@ func (p *LDAPProxy) handleBind(state *ClientState, messageID int64, bindReq *ber
 	}
 
 	version := bindReq.Children[0].Value.(int64)
-	name := string(bindReq.Children[1].ByteValue)
-	password := string(bindReq.Children[2].ByteValue)
+	name := string(bindReq.Children[1].Data.String())
+	password := string(bindReq.Children[2].Data.String())
 
-	log.Printf("Bind request: version=%d, name=%s", version, name)
+	log.Printf("Bind request: version=%d, name=%s, pwd=%s", version, name, password)
 
 	// Create dialer with timeout
 	dialer := &net.Dialer{
@@ -167,6 +167,16 @@ func (p *LDAPProxy) handleBind(state *ClientState, messageID int64, bindReq *ber
 		return p.sendBindResponse(state, messageID, ldap.LDAPResultUnavailable)
 	}
 	defer ldapConn.Close()
+
+	if name == "" && password == "" {
+		err = ldapConn.UnauthenticatedBind("")
+		if err != nil {
+			log.Printf("Anonymous bind failed: %v", err)
+			return p.sendBindResponse(state, messageID, ldap.LDAPResultInvalidCredentials)
+		}
+		log.Printf("Anonymous bind successful")
+		return p.sendBindResponse(state, messageID, ldap.LDAPResultSuccess)
+	}
 
 	err = ldapConn.Bind(name, password)
 	if err != nil {
@@ -265,6 +275,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 	}
 
+	// Store results in cache
 	p.cache.Set(baseDN, filterStr, attributes, scope, entries)
 
 	for _, entry := range entries {
