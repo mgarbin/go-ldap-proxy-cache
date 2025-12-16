@@ -155,7 +155,7 @@ func (p *LDAPProxy) handleBind(state *ClientState, messageID int64, bindReq *ber
 	name := string(bindReq.Children[1].Data.String())
 	password := string(bindReq.Children[2].Data.String())
 
-	log.Printf("Bind request: version=%d, name=%s, pwd=%s", version, name, password)
+	log.Printf("Bind request: version=%d, name=%s", version, name)
 
 	// Create dialer with timeout
 	dialer := &net.Dialer{
@@ -231,10 +231,10 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultProtocolError)
 	}
 
-	log.Printf("Search request: base=%s, scope=%d, filter=%s", baseDN, scope, filterStr)
+	reqKey := p.cache.generateKey(baseDN, filterStr, attributes, scope)
 
 	if cachedData, found := p.cache.Get(baseDN, filterStr, attributes, scope); found {
-		log.Printf("Cache hit for search")
+		log.Printf("[%s] Cache hit for search : host=%s, base=%s, scope=%d, filter=%s", reqKey, state.conn.RemoteAddr().String(), baseDN, scope, filterStr)
 		entries := cachedData.([]*ldap.Entry)
 		for _, entry := range entries {
 			if err := p.sendSearchEntry(state, messageID, entry); err != nil {
@@ -244,7 +244,10 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultSuccess)
 	}
 
-	log.Printf("Cache miss - querying backend")
+	log.Printf("[%s] Cache miss - querying backend", reqKey)
+
+	// Start to calculate elapsed time
+	startDate := time.Now()
 
 	// Create dialer with timeout
 	dialer := &net.Dialer{
@@ -252,7 +255,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	}
 	ldapConn, err := ldap.DialURL(ensureLDAPURL(p.config.LDAPServer), ldap.DialWithDialer(dialer))
 	if err != nil {
-		log.Printf("Failed to connect to backend: %v", err)
+		log.Printf("[%s] Failed to connect to backend: %v", reqKey, err)
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultUnavailable)
 	}
 	defer ldapConn.Close()
@@ -264,19 +267,28 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 
 	if bindDN != "" {
 		if err := ldapConn.Bind(bindDN, bindPwd); err != nil {
-			log.Printf("Backend bind failed: %v", err)
+			log.Printf("[%s] Backend bind failed: %v", reqKey, err)
 			return p.sendSearchDone(state, messageID, ldap.LDAPResultInvalidCredentials)
 		}
 	}
 
 	entries, err := p.searchBackendWithPaging(ldapConn, baseDN, scope, filterStr, attributes)
 	if err != nil {
-		log.Printf("Backend search failed: %v", err)
+		log.Printf("[%s] Backend search failed: %v", reqKey, err)
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 	}
 
 	// Store results in cache
 	p.cache.Set(baseDN, filterStr, attributes, scope, entries)
+
+	// End time for elapsed calculation
+	endDate := time.Now()
+	// Calculate the duration
+	duration := endDate.Sub(startDate)
+	// Convert duration to milliseconds (as an integer value)
+	durationMilliseconds := duration.Milliseconds() // This gives an integer value
+
+	log.Printf("[%s] Search request : host=%s, base=%s, scope=%d, filter=%s, elapsed=%d", reqKey, state.conn.RemoteAddr().String(), baseDN, scope, filterStr, durationMilliseconds)
 
 	for _, entry := range entries {
 		if err := p.sendSearchEntry(state, messageID, entry); err != nil {
