@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"log"
 	"sync/atomic"
@@ -45,28 +43,8 @@ func NewRedisCache(addr, password string, db int, ttl time.Duration) (*RedisCach
 	}, nil
 }
 
-func (rc *RedisCache) generateKey(baseDN, filter string, attributes []string, scope int) string {
-	data := struct {
-		BaseDN     string
-		Filter     string
-		Attributes []string
-		Scope      int
-	}{
-		BaseDN:     baseDN,
-		Filter:     filter,
-		Attributes: attributes,
-		Scope:      scope,
-	}
-
-	// json.Marshal is safe to use here as we're only marshaling simple types
-	// (strings, slices of strings, and int) which cannot fail
-	jsonData, _ := json.Marshal(data)
-	hash := sha256.Sum256(jsonData)
-	return hex.EncodeToString(hash[:])
-}
-
 func (rc *RedisCache) Get(baseDN, filter string, attributes []string, scope int) (interface{}, bool) {
-	key := rc.generateKey(baseDN, filter, attributes, scope)
+	key := generateCacheKey(baseDN, filter, attributes, scope)
 
 	val, err := rc.client.Get(rc.ctx, key).Result()
 	if err == redis.Nil {
@@ -93,7 +71,7 @@ func (rc *RedisCache) Get(baseDN, filter string, attributes []string, scope int)
 }
 
 func (rc *RedisCache) Set(baseDN, filter string, attributes []string, scope int, data interface{}) {
-	key := rc.generateKey(baseDN, filter, attributes, scope)
+	key := generateCacheKey(baseDN, filter, attributes, scope)
 
 	// Serialize the data
 	jsonData, err := json.Marshal(data)

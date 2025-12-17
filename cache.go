@@ -1,9 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -60,28 +57,8 @@ func (c *Cache) cleanup() {
 	}
 }
 
-func (c *Cache) generateKey(baseDN, filter string, attributes []string, scope int) string {
-	data := struct {
-		BaseDN     string
-		Filter     string
-		Attributes []string
-		Scope      int
-	}{
-		BaseDN:     baseDN,
-		Filter:     filter,
-		Attributes: attributes,
-		Scope:      scope,
-	}
-
-	// json.Marshal is safe to use here as we're only marshaling simple types
-	// (strings, slices of strings, and int) which cannot fail
-	jsonData, _ := json.Marshal(data)
-	hash := sha256.Sum256(jsonData)
-	return hex.EncodeToString(hash[:])
-}
-
 func (c *Cache) Get(baseDN, filter string, attributes []string, scope int) (interface{}, bool) {
-	key := c.generateKey(baseDN, filter, attributes, scope)
+	key := generateCacheKey(baseDN, filter, attributes, scope)
 
 	c.mu.RLock()
 	entry, exists := c.entries[key]
@@ -106,7 +83,7 @@ func (c *Cache) Get(baseDN, filter string, attributes []string, scope int) (inte
 }
 
 func (c *Cache) Set(baseDN, filter string, attributes []string, scope int, data interface{}) {
-	key := c.generateKey(baseDN, filter, attributes, scope)
+	key := generateCacheKey(baseDN, filter, attributes, scope)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()

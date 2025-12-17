@@ -65,28 +65,26 @@ func TestCache(t *testing.T) {
 }
 
 func TestCacheKeyGeneration(t *testing.T) {
-	cache := NewCache(time.Minute)
-
 	baseDN1 := "dc=example,dc=com"
 	filter1 := "(uid=test)"
 	attributes1 := []string{"cn", "mail"}
 	scope1 := 2
 
-	key1 := cache.generateKey(baseDN1, filter1, attributes1, scope1)
-	key2 := cache.generateKey(baseDN1, filter1, attributes1, scope1)
+	key1 := generateCacheKey(baseDN1, filter1, attributes1, scope1)
+	key2 := generateCacheKey(baseDN1, filter1, attributes1, scope1)
 
 	if key1 != key2 {
 		t.Error("Same parameters should generate same key")
 	}
 
 	// Different filter should generate different key
-	key3 := cache.generateKey(baseDN1, "(uid=other)", attributes1, scope1)
+	key3 := generateCacheKey(baseDN1, "(uid=other)", attributes1, scope1)
 	if key1 == key3 {
 		t.Error("Different filters should generate different keys")
 	}
 
 	// Different attributes should generate different key
-	key4 := cache.generateKey(baseDN1, filter1, []string{"cn"}, scope1)
+	key4 := generateCacheKey(baseDN1, filter1, []string{"cn"}, scope1)
 	if key1 == key4 {
 		t.Error("Different attributes should generate different keys")
 	}

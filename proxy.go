@@ -1,9 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -36,28 +33,6 @@ type ClientState struct {
 	backendDN  string
 	backendPwd string
 	mu         sync.Mutex
-}
-
-// generateCacheKey generates a cache key for logging purposes
-// This is a helper function that matches the cache key generation logic
-func generateCacheKey(baseDN, filter string, attributes []string, scope int) string {
-	data := struct {
-		BaseDN     string
-		Filter     string
-		Attributes []string
-		Scope      int
-	}{
-		BaseDN:     baseDN,
-		Filter:     filter,
-		Attributes: attributes,
-		Scope:      scope,
-	}
-
-	// json.Marshal is safe to use here as we're only marshaling simple types
-	// (strings, slices of strings, and int) which cannot fail
-	jsonData, _ := json.Marshal(data)
-	hash := sha256.Sum256(jsonData)
-	return hex.EncodeToString(hash[:])
 }
 
 func NewLDAPProxy(config *Config) *LDAPProxy {
