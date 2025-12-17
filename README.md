@@ -5,7 +5,7 @@ A Go-based LDAP proxy with integrated caching to offload OpenLDAP servers.
 ## Features
 
 - **LDAP Protocol Proxy**: Acts as a transparent proxy for LDAP client connections (no HTTP protocol)
-- **15-Minute Cache**: Caches LDAP search results with a configurable TTL (default: 15 minutes)
+- **Flexible Caching**: Supports both in-memory cache and Redis cache with configurable TTL (default: 15 minutes)
 - **Paginated Results Handling**: Automatically handles paginated LDAP responses with offsets, fetching all results from the backend server
 - **Connection Pooling**: Efficiently manages connections to the backend LDAP server
 
@@ -55,6 +55,19 @@ docker run -p 3389:3389 ldap-proxy -ldap-server ldap.example.com:389
 - `-cache-ttl`: Cache TTL duration (default: `15m`)
 - `-connection-timeout`: Backend connection timeout (default: `10s`)
 - `-client-timeout`: Client connection timeout (default: `30s`)
+- `-redis-enabled`: Enable Redis cache instead of in-memory cache (default: `false`)
+- `-redis-addr`: Redis server address (default: `localhost:6379`, only used when Redis is enabled)
+- `-redis-password`: Redis password (default: empty, only used when Redis is enabled)
+- `-redis-db`: Redis database number (default: `0`, only used when Redis is enabled)
+
+### Cache Options
+
+The proxy supports two caching backends:
+
+1. **In-Memory Cache (Default)**: Stores cache entries in the application's memory. Simple and fast, but cache is lost on restart.
+2. **Redis Cache**: Stores cache entries in Redis. Allows cache to persist across restarts and can be shared across multiple proxy instances.
+
+To use Redis cache, enable it with the `-redis-enabled` flag or set `redis_enabled: true` in your configuration file. When Redis is enabled, the in-memory cache is automatically disabled.
 
 ### Configuration File
 
@@ -67,6 +80,12 @@ ldap_server: "localhost:389"  # or ldaps://secure.ldap.example.com:636 for TLS
 cache_ttl: 15m
 connection_timeout: 10s
 client_timeout: 30s
+
+# Optional: Enable Redis cache
+redis_enabled: false
+redis_addr: "localhost:6379"
+redis_password: ""
+redis_db: 0
 ```
 
 Then run:
@@ -82,11 +101,17 @@ Then run:
 Start the proxy using CLI flags:
 
 ```bash
-# Connect to unencrypted LDAP server
+# Connect to unencrypted LDAP server with in-memory cache
 ./ldap-proxy -proxy-addr :3389 -ldap-server ldap.example.com:389 -cache-ttl 15m
 
-# Connect to LDAPS (LDAP over TLS) server
+# Connect to LDAPS (LDAP over TLS) server with in-memory cache
 ./ldap-proxy -proxy-addr :3389 -ldap-server ldaps://secure.example.com:636 -cache-ttl 15m
+
+# Use Redis cache instead of in-memory cache
+./ldap-proxy -proxy-addr :3389 -ldap-server ldap.example.com:389 -redis-enabled -redis-addr localhost:6379
+
+# Use Redis cache with authentication
+./ldap-proxy -redis-enabled -redis-addr localhost:6379 -redis-password mypassword -redis-db 1
 ```
 
 Or using a YAML config file:
@@ -139,11 +164,13 @@ This ensures that identical queries return cached results while different querie
 
 - Go 1.23 or higher
 - Access to an LDAP server
+- (Optional) Redis server for external caching
 
 ## Dependencies
 
 - [github.com/go-ldap/ldap/v3](https://github.com/go-ldap/ldap) - LDAP client library
 - [github.com/go-asn1-ber/asn1-ber](https://github.com/go-asn1-ber/asn1-ber) - ASN.1 BER encoding/decoding
+- [github.com/redis/go-redis/v9](https://github.com/redis/go-redis) - Redis client library (when using Redis cache)
 
 ## License
 
