@@ -283,3 +283,93 @@ func TestEnsureLDAPURL(t *testing.T) {
 		})
 	}
 }
+
+func TestRedisConfig(t *testing.T) {
+	config := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+		RedisEnabled:      true,
+		RedisAddr:         "localhost:6379",
+		RedisPassword:     "mypassword",
+		RedisDB:           1,
+	}
+
+	if !config.RedisEnabled {
+		t.Error("Expected Redis to be enabled")
+	}
+
+	if config.RedisAddr != "localhost:6379" {
+		t.Errorf("Expected Redis addr localhost:6379, got %s", config.RedisAddr)
+	}
+
+	if config.RedisPassword != "mypassword" {
+		t.Errorf("Expected Redis password mypassword, got %s", config.RedisPassword)
+	}
+
+	if config.RedisDB != 1 {
+		t.Errorf("Expected Redis DB 1, got %d", config.RedisDB)
+	}
+}
+
+func TestYAMLConfigWithRedis(t *testing.T) {
+	// Create a temporary YAML config file with Redis settings
+	yamlContent := `proxy_addr: ":4389"
+ldap_server: "ldap.test.com:389"
+cache_ttl: 30m
+connection_timeout: 15s
+client_timeout: 45s
+redis_enabled: true
+redis_addr: "redis.test.com:6379"
+redis_password: "testpass"
+redis_db: 2
+`
+
+	tmpFile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.Write([]byte(yamlContent)); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	// Test loading YAML config with Redis settings
+	config := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+		RedisEnabled:      false,
+		RedisAddr:         "localhost:6379",
+		RedisPassword:     "",
+		RedisDB:           0,
+	}
+
+	err = loadYAMLConfig(tmpFile.Name(), config)
+	if err != nil {
+		t.Fatalf("Failed to load YAML config: %v", err)
+	}
+
+	if !config.RedisEnabled {
+		t.Error("Expected Redis to be enabled from YAML")
+	}
+
+	if config.RedisAddr != "redis.test.com:6379" {
+		t.Errorf("Expected Redis addr redis.test.com:6379, got %s", config.RedisAddr)
+	}
+
+	if config.RedisPassword != "testpass" {
+		t.Errorf("Expected Redis password testpass, got %s", config.RedisPassword)
+	}
+
+	if config.RedisDB != 2 {
+		t.Errorf("Expected Redis DB 2, got %d", config.RedisDB)
+	}
+}
+

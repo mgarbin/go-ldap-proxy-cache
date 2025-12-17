@@ -21,7 +21,7 @@ const (
 
 type LDAPProxy struct {
 	config *Config
-	cache  *Cache
+	cache  CacheInterface
 }
 
 type ClientState struct {
@@ -36,9 +36,25 @@ type ClientState struct {
 }
 
 func NewLDAPProxy(config *Config) *LDAPProxy {
+	var cache CacheInterface
+	
+	if config.RedisEnabled {
+		// Try to create Redis cache
+		redisCache, err := NewRedisCache(config.RedisAddr, config.RedisPassword, config.RedisDB, config.CacheTTL)
+		if err != nil {
+			log.Fatalf("Failed to connect to Redis: %v", err)
+		}
+		cache = redisCache
+		log.Printf("Using Redis cache at %s (db=%d)", config.RedisAddr, config.RedisDB)
+	} else {
+		// Use in-memory cache
+		cache = NewCache(config.CacheTTL)
+		log.Printf("Using in-memory cache")
+	}
+	
 	return &LDAPProxy{
 		config: config,
-		cache:  NewCache(config.CacheTTL),
+		cache:  cache,
 	}
 }
 

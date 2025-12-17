@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+// CacheInterface defines the contract for cache implementations
+type CacheInterface interface {
+	Get(baseDN, filter string, attributes []string, scope int) (interface{}, bool)
+	Set(baseDN, filter string, attributes []string, scope int, data interface{})
+	Stats() (hits, misses uint64, size int)
+	generateKey(baseDN, filter string, attributes []string, scope int) string
+}
+
 type CacheEntry struct {
 	Data      interface{}
 	ExpiresAt time.Time
