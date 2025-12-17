@@ -128,7 +128,7 @@ func loadYAMLConfig(filename string, config *Config) error {
 	if yamlConfig.ClientTimeout != 0 {
 		config.ClientTimeout = yamlConfig.ClientTimeout
 	}
-	// For bool, check if it was explicitly set in YAML by checking the YAML struct
+	// For bool, always use YAML value (false or true)
 	config.RedisEnabled = yamlConfig.RedisEnabled
 	if yamlConfig.RedisAddr != "" {
 		config.RedisAddr = yamlConfig.RedisAddr
@@ -136,9 +136,9 @@ func loadYAMLConfig(filename string, config *Config) error {
 	if yamlConfig.RedisPassword != "" {
 		config.RedisPassword = yamlConfig.RedisPassword
 	}
-	// RedisDB can be 0, so we need to check if it was set in YAML
-	// We'll accept any value from YAML since 0 is valid
-	if yamlConfig.RedisDB != 0 || yamlConfig.RedisEnabled {
+	// For RedisDB, only override if Redis is enabled or value is non-zero
+	// This allows explicit 0 when Redis is enabled, but keeps default when Redis is disabled
+	if yamlConfig.RedisEnabled || yamlConfig.RedisDB != 0 {
 		config.RedisDB = yamlConfig.RedisDB
 	}
 

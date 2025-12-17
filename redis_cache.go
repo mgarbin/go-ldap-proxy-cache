@@ -113,8 +113,11 @@ func (rc *RedisCache) Stats() (hits, misses uint64, size int) {
 	misses = atomic.LoadUint64(&rc.misses)
 
 	// Get approximate size (number of keys)
-	// Note: DBSIZE returns the total number of keys in the Redis database,
-	// not just cache keys. This is an approximation.
+	// Note: DBSIZE returns the total number of keys in the selected Redis database,
+	// not just keys created by this cache. If the Redis database is shared with
+	// other applications or cache instances, this count will include all keys in the database.
+	// For accurate cache-specific counts, consider using a key prefix and SCAN command,
+	// or maintain a separate counter.
 	dbSize, err := rc.client.DBSize(rc.ctx).Result()
 	if err != nil {
 		log.Printf("Redis DBSIZE error: %v", err)
