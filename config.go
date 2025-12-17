@@ -28,10 +28,12 @@ func LoadConfig() *Config {
 	var cacheTTL time.Duration
 	var connectionTimeout time.Duration
 	var clientTimeout time.Duration
-	var redisEnabled bool
 	var redisAddr string
 	var redisPassword string
 	var redisDB int
+
+	// Use pointer for bool to detect if flag was explicitly set
+	redisEnabled := flag.Bool("redis-enabled", false, "Enable Redis cache")
 
 	flag.StringVar(&configFile, "config", "", "Path to YAML configuration file")
 	flag.StringVar(&proxyAddr, "proxy-addr", "", "Proxy listen address")
@@ -39,12 +41,19 @@ func LoadConfig() *Config {
 	flag.DurationVar(&cacheTTL, "cache-ttl", 0, "Cache TTL duration")
 	flag.DurationVar(&connectionTimeout, "connection-timeout", 0, "Backend connection timeout")
 	flag.DurationVar(&clientTimeout, "client-timeout", 0, "Client connection timeout")
-	flag.BoolVar(&redisEnabled, "redis-enabled", false, "Enable Redis cache")
 	flag.StringVar(&redisAddr, "redis-addr", "", "Redis server address")
 	flag.StringVar(&redisPassword, "redis-password", "", "Redis password")
 	flag.IntVar(&redisDB, "redis-db", -1, "Redis database number")
 
 	flag.Parse()
+
+	// Track if redis-enabled was explicitly set
+	redisEnabledSet := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "redis-enabled" {
+			redisEnabledSet = true
+		}
+	})
 
 	// Start with defaults
 	config := &Config{
@@ -83,9 +92,9 @@ func LoadConfig() *Config {
 	if clientTimeout != 0 {
 		config.ClientTimeout = clientTimeout
 	}
-	// Use flag.Lookup to check if the redis-enabled flag was explicitly set
-	if flag.Lookup("redis-enabled").Value.String() == "true" {
-		config.RedisEnabled = redisEnabled
+	// Only override redis-enabled if it was explicitly set via CLI flag
+	if redisEnabledSet {
+		config.RedisEnabled = *redisEnabled
 	}
 	if redisAddr != "" {
 		config.RedisAddr = redisAddr

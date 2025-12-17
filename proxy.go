@@ -35,14 +35,14 @@ type ClientState struct {
 	mu         sync.Mutex
 }
 
-func NewLDAPProxy(config *Config) *LDAPProxy {
+func NewLDAPProxy(config *Config) (*LDAPProxy, error) {
 	var cache CacheInterface
 
 	if config.RedisEnabled {
 		// Try to create Redis cache
 		redisCache, err := NewRedisCache(config.RedisAddr, config.RedisPassword, config.RedisDB, config.CacheTTL)
 		if err != nil {
-			log.Fatalf("Failed to connect to Redis: %v", err)
+			return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 		}
 		cache = redisCache
 		log.Printf("Using Redis cache at %s (db=%d)", config.RedisAddr, config.RedisDB)
@@ -55,7 +55,7 @@ func NewLDAPProxy(config *Config) *LDAPProxy {
 	return &LDAPProxy{
 		config: config,
 		cache:  cache,
-	}
+	}, nil
 }
 
 // ensureLDAPURL ensures that the server address has an LDAP protocol prefix.

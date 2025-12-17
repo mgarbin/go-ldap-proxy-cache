@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 )
 
 // generateCacheKey generates a consistent cache key based on LDAP search parameters
@@ -21,9 +22,12 @@ func generateCacheKey(baseDN, filter string, attributes []string, scope int) str
 		Scope:      scope,
 	}
 
-	// json.Marshal is safe to use here as we're only marshaling simple types
-	// (strings, slices of strings, and int) which cannot fail
-	jsonData, _ := json.Marshal(data)
+	// json.Marshal with simple types (strings, slices of strings, and int) should never fail
+	// If it does, this indicates a critical system issue that should be caught immediately
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to marshal cache key data: %v", err))
+	}
 	hash := sha256.Sum256(jsonData)
 	return hex.EncodeToString(hash[:])
 }

@@ -12,6 +12,7 @@ type CacheInterface interface {
 	Get(baseDN, filter string, attributes []string, scope int) (interface{}, bool)
 	Set(baseDN, filter string, attributes []string, scope int, data interface{})
 	Stats() (hits, misses uint64, size int)
+	Close() error
 }
 
 type CacheEntry struct {
@@ -102,4 +103,9 @@ func (c *Cache) Stats() (hits, misses uint64, size int) {
 	hits = atomic.LoadUint64(&c.hits)
 	misses = atomic.LoadUint64(&c.misses)
 	return
+}
+
+// Close is a no-op for in-memory cache
+func (c *Cache) Close() error {
+	return nil
 }
