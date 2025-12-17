@@ -21,7 +21,7 @@ const (
 
 type LDAPProxy struct {
 	config *Config
-	cache  *Cache
+	cache  CacheInterface
 }
 
 type ClientState struct {
@@ -35,11 +35,27 @@ type ClientState struct {
 	mu         sync.Mutex
 }
 
-func NewLDAPProxy(config *Config) *LDAPProxy {
+func NewLDAPProxy(config *Config) (*LDAPProxy, error) {
+	var cache CacheInterface
+
+	if config.RedisEnabled {
+		// Try to create Redis cache
+		redisCache, err := NewRedisCache(config.RedisAddr, config.RedisPassword, config.RedisDB, config.CacheTTL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+		}
+		cache = redisCache
+		log.Printf("Using Redis cache at %s (db=%d)", config.RedisAddr, config.RedisDB)
+	} else {
+		// Use in-memory cache
+		cache = NewCache(config.CacheTTL)
+		log.Printf("Using in-memory cache")
+	}
+
 	return &LDAPProxy{
 		config: config,
-		cache:  NewCache(config.CacheTTL),
-	}
+		cache:  cache,
+	}, nil
 }
 
 // ensureLDAPURL ensures that the server address has an LDAP protocol prefix.
@@ -231,7 +247,8 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultProtocolError)
 	}
 
-	reqKey := p.cache.generateKey(baseDN, filterStr, attributes, scope)
+	// Generate a key for logging purposes
+	reqKey := generateCacheKey(baseDN, filterStr, attributes, scope)
 
 	if cachedData, found := p.cache.Get(baseDN, filterStr, attributes, scope); found {
 		log.Printf("[%s] Cache hit for search : host=%s, base=%s, scope=%d, filter=%s", reqKey, state.conn.RemoteAddr().String(), baseDN, scope, filterStr)

@@ -1,14 +1,19 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"log"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// CacheInterface defines the contract for cache implementations
+type CacheInterface interface {
+	Get(baseDN, filter string, attributes []string, scope int) (interface{}, bool)
+	Set(baseDN, filter string, attributes []string, scope int, data interface{})
+	Stats() (hits, misses uint64, size int)
+	Close() error
+}
 
 type CacheEntry struct {
 	Data      interface{}
@@ -53,28 +58,8 @@ func (c *Cache) cleanup() {
 	}
 }
 
-func (c *Cache) generateKey(baseDN, filter string, attributes []string, scope int) string {
-	data := struct {
-		BaseDN     string
-		Filter     string
-		Attributes []string
-		Scope      int
-	}{
-		BaseDN:     baseDN,
-		Filter:     filter,
-		Attributes: attributes,
-		Scope:      scope,
-	}
-
-	// json.Marshal is safe to use here as we're only marshaling simple types
-	// (strings, slices of strings, and int) which cannot fail
-	jsonData, _ := json.Marshal(data)
-	hash := sha256.Sum256(jsonData)
-	return hex.EncodeToString(hash[:])
-}
-
 func (c *Cache) Get(baseDN, filter string, attributes []string, scope int) (interface{}, bool) {
-	key := c.generateKey(baseDN, filter, attributes, scope)
+	key := generateCacheKey(baseDN, filter, attributes, scope)
 
 	c.mu.RLock()
 	entry, exists := c.entries[key]
@@ -99,7 +84,7 @@ func (c *Cache) Get(baseDN, filter string, attributes []string, scope int) (inte
 }
 
 func (c *Cache) Set(baseDN, filter string, attributes []string, scope int, data interface{}) {
-	key := c.generateKey(baseDN, filter, attributes, scope)
+	key := generateCacheKey(baseDN, filter, attributes, scope)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -118,4 +103,9 @@ func (c *Cache) Stats() (hits, misses uint64, size int) {
 	hits = atomic.LoadUint64(&c.hits)
 	misses = atomic.LoadUint64(&c.misses)
 	return
+}
+
+// Close is a no-op for in-memory cache
+func (c *Cache) Close() error {
+	return nil
 }

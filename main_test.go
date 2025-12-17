@@ -65,28 +65,26 @@ func TestCache(t *testing.T) {
 }
 
 func TestCacheKeyGeneration(t *testing.T) {
-	cache := NewCache(time.Minute)
-
 	baseDN1 := "dc=example,dc=com"
 	filter1 := "(uid=test)"
 	attributes1 := []string{"cn", "mail"}
 	scope1 := 2
 
-	key1 := cache.generateKey(baseDN1, filter1, attributes1, scope1)
-	key2 := cache.generateKey(baseDN1, filter1, attributes1, scope1)
+	key1 := generateCacheKey(baseDN1, filter1, attributes1, scope1)
+	key2 := generateCacheKey(baseDN1, filter1, attributes1, scope1)
 
 	if key1 != key2 {
 		t.Error("Same parameters should generate same key")
 	}
 
 	// Different filter should generate different key
-	key3 := cache.generateKey(baseDN1, "(uid=other)", attributes1, scope1)
+	key3 := generateCacheKey(baseDN1, "(uid=other)", attributes1, scope1)
 	if key1 == key3 {
 		t.Error("Different filters should generate different keys")
 	}
 
 	// Different attributes should generate different key
-	key4 := cache.generateKey(baseDN1, filter1, []string{"cn"}, scope1)
+	key4 := generateCacheKey(baseDN1, filter1, []string{"cn"}, scope1)
 	if key1 == key4 {
 		t.Error("Different attributes should generate different keys")
 	}
@@ -281,5 +279,94 @@ func TestEnsureLDAPURL(t *testing.T) {
 				t.Errorf("ensureLDAPURL(%q) = %q, expected %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestRedisConfig(t *testing.T) {
+	config := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+		RedisEnabled:      true,
+		RedisAddr:         "localhost:6379",
+		RedisPassword:     "mypassword",
+		RedisDB:           1,
+	}
+
+	if !config.RedisEnabled {
+		t.Error("Expected Redis to be enabled")
+	}
+
+	if config.RedisAddr != "localhost:6379" {
+		t.Errorf("Expected Redis addr localhost:6379, got %s", config.RedisAddr)
+	}
+
+	if config.RedisPassword != "mypassword" {
+		t.Errorf("Expected Redis password mypassword, got %s", config.RedisPassword)
+	}
+
+	if config.RedisDB != 1 {
+		t.Errorf("Expected Redis DB 1, got %d", config.RedisDB)
+	}
+}
+
+func TestYAMLConfigWithRedis(t *testing.T) {
+	// Create a temporary YAML config file with Redis settings
+	yamlContent := `proxy_addr: ":4389"
+ldap_server: "ldap.test.com:389"
+cache_ttl: 30m
+connection_timeout: 15s
+client_timeout: 45s
+redis_enabled: true
+redis_addr: "redis.test.com:6379"
+redis_password: "testpass"
+redis_db: 2
+`
+
+	tmpFile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.Write([]byte(yamlContent)); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	// Test loading YAML config with Redis settings
+	config := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+		RedisEnabled:      false,
+		RedisAddr:         "localhost:6379",
+		RedisPassword:     "",
+		RedisDB:           0,
+	}
+
+	err = loadYAMLConfig(tmpFile.Name(), config)
+	if err != nil {
+		t.Fatalf("Failed to load YAML config: %v", err)
+	}
+
+	if !config.RedisEnabled {
+		t.Error("Expected Redis to be enabled from YAML")
+	}
+
+	if config.RedisAddr != "redis.test.com:6379" {
+		t.Errorf("Expected Redis addr redis.test.com:6379, got %s", config.RedisAddr)
+	}
+
+	if config.RedisPassword != "testpass" {
+		t.Errorf("Expected Redis password testpass, got %s", config.RedisPassword)
+	}
+
+	if config.RedisDB != 2 {
+		t.Errorf("Expected Redis DB 2, got %d", config.RedisDB)
 	}
 }

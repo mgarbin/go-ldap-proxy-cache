@@ -22,6 +22,22 @@ connection_timeout: 10s
 # Time to wait for client operations
 client_timeout: 30s
 
+# Redis cache configuration (default: disabled)
+# When enabled, Redis will be used instead of in-memory cache
+redis_enabled: false
+
+# Redis server address (default: localhost:6379)
+# Only used when redis_enabled is true
+redis_addr: "localhost:6379"
+
+# Redis password (default: empty/no password)
+# Only used when redis_enabled is true
+redis_password: ""
+
+# Redis database number (default: 0)
+# Only used when redis_enabled is true
+redis_db: 0
+
 # Example usage:
 # ./ldap-proxy -config config.yaml
 #
@@ -30,3 +46,6 @@ client_timeout: 30s
 #
 # When using a config file, all command-line flags become optional.
 # CLI flags will override values from the YAML config file.
+#
+# To enable Redis cache via command line:
+# ./ldap-proxy -redis-enabled -redis-addr localhost:6379 -redis-db 0
