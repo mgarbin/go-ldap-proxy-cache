@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/go-ldap/ldap/v3"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -58,16 +59,17 @@ func (rc *RedisCache) Get(baseDN, filter string, attributes []string, scope int)
 		return nil, false
 	}
 
-	// Deserialize the data
-	var data interface{}
-	if err := json.Unmarshal([]byte(val), &data); err != nil {
+	// Deserialize the data to the correct type ([]*ldap.Entry)
+	// This is the type that the proxy expects for LDAP search results
+	var entries []*ldap.Entry
+	if err := json.Unmarshal([]byte(val), &entries); err != nil {
 		log.Printf("Redis data unmarshal error: %v", err)
 		atomic.AddUint64(&rc.misses, 1)
 		return nil, false
 	}
 
 	atomic.AddUint64(&rc.hits, 1)
-	return data, true
+	return entries, true
 }
 
 func (rc *RedisCache) Set(baseDN, filter string, attributes []string, scope int, data interface{}) {
