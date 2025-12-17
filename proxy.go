@@ -37,7 +37,7 @@ type ClientState struct {
 
 func NewLDAPProxy(config *Config) *LDAPProxy {
 	var cache CacheInterface
-	
+
 	if config.RedisEnabled {
 		// Try to create Redis cache
 		redisCache, err := NewRedisCache(config.RedisAddr, config.RedisPassword, config.RedisDB, config.CacheTTL)
@@ -51,7 +51,7 @@ func NewLDAPProxy(config *Config) *LDAPProxy {
 		cache = NewCache(config.CacheTTL)
 		log.Printf("Using in-memory cache")
 	}
-	
+
 	return &LDAPProxy{
 		config: config,
 		cache:  cache,

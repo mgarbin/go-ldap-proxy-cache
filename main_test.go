@@ -372,4 +372,3 @@ redis_db: 2
 		t.Errorf("Expected Redis DB 2, got %d", config.RedisDB)
 	}
 }
-
