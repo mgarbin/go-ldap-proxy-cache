@@ -240,6 +240,9 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultProtocolError)
 	}
 
+	// Calculate request bytes from the search request packet
+	requestBytes := len(searchReq.Bytes())
+
 	baseDN := string(searchReq.Children[0].ByteValue)
 	scope := int(searchReq.Children[1].Value.(int64))
 	filterPacket := searchReq.Children[6]
@@ -262,20 +265,33 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	reqKey := generateCacheKey(baseDN, filterStr, attributes, scope)
 
 	if cachedData, found := p.cache.Get(baseDN, filterStr, attributes, scope); found {
+		// Track answer bytes for cache hit
+		var answerBytes int
+		entries := cachedData.([]*ldap.Entry)
+		for _, entry := range entries {
+			entryBytes, err := p.sendSearchEntryWithSize(state, messageID, entry)
+			if err != nil {
+				return err
+			}
+			answerBytes += entryBytes
+		}
+		doneBytes, err := p.sendSearchDoneWithSize(state, messageID, ldap.LDAPResultSuccess)
+		if err != nil {
+			return err
+		}
+		answerBytes += doneBytes
+
 		p.logger.Info().
 			Str("key", reqKey).
 			Str("host", state.conn.RemoteAddr().String()).
 			Str("base", baseDN).
 			Int("scope", scope).
 			Str("filter", filterStr).
+			Strs("attributes", attributes).
+			Int("request_bytes", requestBytes).
+			Int("answer_bytes", answerBytes).
 			Msg("Cache hit for search")
-		entries := cachedData.([]*ldap.Entry)
-		for _, entry := range entries {
-			if err := p.sendSearchEntry(state, messageID, entry); err != nil {
-				return err
-			}
-		}
-		return p.sendSearchDone(state, messageID, ldap.LDAPResultSuccess)
+		return nil
 	}
 
 	p.logger.Info().Str("key", reqKey).Msg("Cache miss - querying backend")
@@ -322,22 +338,34 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	// Convert duration to milliseconds (as an integer value)
 	durationMilliseconds := duration.Milliseconds() // This gives an integer value
 
+	// Track answer bytes for backend query
+	var answerBytes int
+	for _, entry := range entries {
+		entryBytes, err := p.sendSearchEntryWithSize(state, messageID, entry)
+		if err != nil {
+			return err
+		}
+		answerBytes += entryBytes
+	}
+	doneBytes, err := p.sendSearchDoneWithSize(state, messageID, ldap.LDAPResultSuccess)
+	if err != nil {
+		return err
+	}
+	answerBytes += doneBytes
+
 	p.logger.Info().
 		Str("key", reqKey).
 		Str("host", state.conn.RemoteAddr().String()).
 		Str("base", baseDN).
 		Int("scope", scope).
 		Str("filter", filterStr).
+		Strs("attributes", attributes).
+		Int("request_bytes", requestBytes).
+		Int("answer_bytes", answerBytes).
 		Int64("elapsed_ms", durationMilliseconds).
 		Msg("Search request")
 
-	for _, entry := range entries {
-		if err := p.sendSearchEntry(state, messageID, entry); err != nil {
-			return err
-		}
-	}
-
-	return p.sendSearchDone(state, messageID, ldap.LDAPResultSuccess)
+	return nil
 }
 
 func (p *LDAPProxy) searchBackendWithPaging(conn *ldap.Conn, baseDN string, scope int, filter string, attributes []string) ([]*ldap.Entry, error) {
@@ -387,6 +415,12 @@ func (p *LDAPProxy) searchBackendWithPaging(conn *ldap.Conn, baseDN string, scop
 }
 
 func (p *LDAPProxy) sendSearchEntry(state *ClientState, messageID int64, entry *ldap.Entry) error {
+	_, err := p.sendSearchEntryWithSize(state, messageID, entry)
+	return err
+}
+
+// sendSearchEntryWithSize sends a search entry response and returns the number of bytes sent
+func (p *LDAPProxy) sendSearchEntryWithSize(state *ClientState, messageID int64, entry *ldap.Entry) (int, error) {
 	response := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
 	response.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "Message ID"))
 
@@ -409,11 +443,18 @@ func (p *LDAPProxy) sendSearchEntry(state *ClientState, messageID int64, entry *
 
 	response.AppendChild(searchEntry)
 
-	_, err := state.conn.Write(response.Bytes())
-	return err
+	responseBytes := response.Bytes()
+	_, err := state.conn.Write(responseBytes)
+	return len(responseBytes), err
 }
 
 func (p *LDAPProxy) sendSearchDone(state *ClientState, messageID int64, resultCode uint16) error {
+	_, err := p.sendSearchDoneWithSize(state, messageID, resultCode)
+	return err
+}
+
+// sendSearchDoneWithSize sends a search done response and returns the number of bytes sent
+func (p *LDAPProxy) sendSearchDoneWithSize(state *ClientState, messageID int64, resultCode uint16) (int, error) {
 	response := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
 	response.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "Message ID"))
 
@@ -424,8 +465,9 @@ func (p *LDAPProxy) sendSearchDone(state *ClientState, messageID int64, resultCo
 
 	response.AppendChild(searchDone)
 
-	_, err := state.conn.Write(response.Bytes())
-	return err
+	responseBytes := response.Bytes()
+	_, err := state.conn.Write(responseBytes)
+	return len(responseBytes), err
 }
 
 func (p *LDAPProxy) handleUnbind(state *ClientState) error {
