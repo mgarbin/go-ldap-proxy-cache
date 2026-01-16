@@ -64,6 +64,10 @@ docker run -p 3389:3389 ldap-proxy -ldap-server ldap.example.com:389
 - `-log-json`: Enable JSON logging format (default: `false`)
   - When set to `true`, logs are output in JSON format for easier parsing and integration with log aggregation systems
   - When set to `false` (default), logs are output in human-readable console format
+- `-log-file`: Path to log file (default: `""`, which means stdout)
+  - When specified, logs are written to the specified file instead of stdout
+  - The file is created if it doesn't exist, and new logs are appended to existing content
+  - Example: `-log-file /var/log/ldap-proxy.log` or `-log-file ./logs/proxy.log`
 
 ### Cache Options
 
@@ -95,6 +99,10 @@ redis_enabled: false
 redis_addr: "localhost:6379"
 redis_password: ""
 redis_db: 0
+
+# Logging configuration
+log_json: false  # Set to true for JSON format logs
+log_file: ""     # Path to log file (empty means stdout)
 ```
 
 Then run:
@@ -124,6 +132,12 @@ Start the proxy using CLI flags:
 
 # Use Redis cache with authentication
 ./ldap-proxy -redis-enabled -redis-addr localhost:6379 -redis-password mypassword -redis-db 1
+
+# Write logs to a file
+./ldap-proxy -log-file /var/log/ldap-proxy.log
+
+# Write JSON logs to a file
+./ldap-proxy -log-json -log-file /var/log/ldap-proxy.log
 ```
 
 Or using a YAML config file:

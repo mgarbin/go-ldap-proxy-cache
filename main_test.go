@@ -580,3 +580,119 @@ log_json: true
 		t.Errorf("Expected proxy addr :4389, got %s", config.ProxyAddr)
 	}
 }
+
+func TestYAMLConfigWithLogFile(t *testing.T) {
+	// Create a temporary YAML config file with log_file setting
+	yamlContent := `proxy_addr: ":4389"
+ldap_server: "ldap.test.com:389"
+cache_ttl: 30m
+connection_timeout: 15s
+client_timeout: 45s
+log_file: "/var/log/ldap-proxy.log"
+`
+
+	tmpFile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.Write([]byte(yamlContent)); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	// Test loading YAML config with log_file setting
+	config := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheEnabled:      true,
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+		LogFile:           "",
+	}
+
+	err = loadYAMLConfig(tmpFile.Name(), config)
+	if err != nil {
+		t.Fatalf("Failed to load YAML config: %v", err)
+	}
+
+	if config.LogFile != "/var/log/ldap-proxy.log" {
+		t.Errorf("Expected LogFile to be '/var/log/ldap-proxy.log' from YAML, got %s", config.LogFile)
+	}
+
+	if config.ProxyAddr != ":4389" {
+		t.Errorf("Expected proxy addr :4389, got %s", config.ProxyAddr)
+	}
+}
+
+func TestLogFileConfig(t *testing.T) {
+	config := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheEnabled:      true,
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+		LogFile:           "/var/log/test.log",
+	}
+
+	if config.LogFile != "/var/log/test.log" {
+		t.Errorf("Expected LogFile to be '/var/log/test.log', got %s", config.LogFile)
+	}
+
+	// Test default value
+	config2 := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheEnabled:      true,
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+		LogFile:           "",
+	}
+
+	if config2.LogFile != "" {
+		t.Errorf("Expected LogFile to be empty by default, got %s", config2.LogFile)
+	}
+}
+
+func TestInitLoggerWithFile(t *testing.T) {
+	// Test creating logger with file output
+	tmpFile, err := os.CreateTemp("", "test-log-*.log")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	tmpFile.Close()
+	defer os.Remove(tmpFile.Name())
+
+	logger, err := InitLogger(false, tmpFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to create logger with file: %v", err)
+	}
+
+	// Write a test log
+	logger.Info().Msg("Test log message")
+
+	// Verify the log was written to file
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
+	}
+
+	if len(content) == 0 {
+		t.Error("Expected log file to contain content")
+	}
+}
+
+func TestInitLoggerStdout(t *testing.T) {
+	// Test creating logger with stdout (default)
+	logger, err := InitLogger(false, "")
+	if err != nil {
+		t.Fatalf("Failed to create logger with stdout: %v", err)
+	}
+
+	// Just verify that logger was created successfully
+	logger.Info().Msg("Test log message to stdout")
+}

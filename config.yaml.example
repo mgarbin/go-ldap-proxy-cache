@@ -50,6 +50,12 @@ redis_db: 0
 # with log aggregation systems. When false, logs use human-readable console format.
 log_json: false
 
+# Path to log file (default: "" which means stdout)
+# When specified, logs are written to this file instead of stdout
+# The file is created if it doesn't exist, and new logs are appended to existing content
+# Example: "/var/log/ldap-proxy.log" or "./logs/proxy.log"
+log_file: ""
+
 # Example usage:
 # ./ldap-proxy -config config.yaml
 #
@@ -67,3 +73,9 @@ log_json: false
 #
 # To enable JSON logging via command line:
 # ./ldap-proxy -log-json
+
+# To write logs to a file via command line:
+# ./ldap-proxy -log-file /var/log/ldap-proxy.log
+#
+# To write JSON logs to a file:
+# ./ldap-proxy -log-json -log-file /var/log/ldap-proxy.log
