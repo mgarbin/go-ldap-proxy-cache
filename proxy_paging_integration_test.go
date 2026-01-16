@@ -81,14 +81,14 @@ func TestPagingIntegration(t *testing.T) {
 	t.Run("ControlParsing", func(t *testing.T) {
 		// Create a paging control
 		pagingControl := ldap.NewControlPaging(2)
-		
+
 		// Encode the control
 		controlPacket := pagingControl.Encode()
-		
+
 		// Create a controls sequence (tag 0, class context)
 		controlsPacket := ber.Encode(ber.ClassContext, ber.TypeConstructed, 0, nil, "Controls")
 		controlsPacket.AppendChild(controlPacket)
-		
+
 		// Create a minimal search request BER packet with controls
 		searchReq := ber.Encode(ber.ClassApplication, ber.TypeConstructed, 3, nil, "Search Request")
 		searchReq.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, baseDN, "Base DN"))

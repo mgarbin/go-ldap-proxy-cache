@@ -271,6 +271,8 @@ func (p *LDAPProxy) handleRequest(state *ClientState, packet *ber.Packet) error 
 		return p.handleSearch(state, messageID, protocolOp)
 	case ldap.ApplicationUnbindRequest:
 		return p.handleUnbind(state)
+	case ldap.ApplicationCompareRequest:
+		return p.handleCompare(state, messageID, protocolOp)
 	default:
 		p.logger.Warn().Int("tag", int(protocolOp.Tag)).Msg("Unsupported LDAP operation")
 		return fmt.Errorf("unsupported operation")
@@ -331,7 +333,7 @@ func (p *LDAPProxy) parseControlsFromSearchRequest(searchReq *ber.Packet) []ldap
 	// Controls are optional and appear as the 9th child (index 8) if present
 	if len(searchReq.Children) > 8 {
 		controlsPacket := searchReq.Children[8]
-		
+
 		// Controls are context-specific class with tag 0
 		// In LDAP messages, controls are wrapped in a context tag
 		if controlsPacket.ClassType == ber.ClassContext && controlsPacket.Tag == 0 {
@@ -389,7 +391,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 
 	// Parse controls from the search request
 	controls := p.parseControlsFromSearchRequest(searchReq)
-	
+
 	// Check if client requested paging
 	var clientPagingControl *ldap.ControlPaging
 	for _, ctrl := range controls {
@@ -403,7 +405,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 
 	// Generate a key for logging purposes
 	reqKey := generateCacheKey(baseDN, filterStr, attributes, scope)
-	
+
 	// Get all entries (from cache or backend)
 	var allEntries []*ldap.Entry
 	var fromCache bool
@@ -470,9 +472,9 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	if clientPagingControl != nil {
 		// Client wants paged results
 		pageSize := int(clientPagingControl.PagingSize)
-		
+
 		var startOffset int
-		
+
 		// Check if this is a continuation of a previous paged search
 		if len(clientPagingControl.Cookie) > 0 {
 			cookieStr := string(clientPagingControl.Cookie)
@@ -485,17 +487,17 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 				return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 			}
 		}
-		
+
 		// Determine entries to send for this page
 		endOffset := startOffset + pageSize
 		if endOffset > len(allEntries) {
 			endOffset = len(allEntries)
 		}
 		entriesToSend = allEntries[startOffset:endOffset]
-		
+
 		// Prepare response control
 		responseControl = ldap.NewControlPaging(uint32(pageSize))
-		
+
 		// If there are more results, generate a cookie
 		if endOffset < len(allEntries) {
 			// Generate a cryptographically secure random cookie
@@ -505,10 +507,10 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 				return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 			}
 			responseControl.SetCookie([]byte(cookie))
-			
+
 			// Store the paging state
 			p.pagingState.Store(cookie, allEntries, endOffset)
-			
+
 			p.logger.Debug().
 				Int("offset", endOffset).
 				Int("total", len(allEntries)).
@@ -516,7 +518,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		} else {
 			// No more results, send empty cookie
 			responseControl.SetCookie([]byte{})
-			
+
 			// Clean up any previous paging state
 			if len(clientPagingControl.Cookie) > 0 {
 				p.pagingState.Delete(string(clientPagingControl.Cookie))
@@ -536,7 +538,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		}
 		answerBytes += entryBytes
 	}
-	
+
 	// Send search done with control if paging was requested
 	var doneBytes int
 	if responseControl != nil {
@@ -565,7 +567,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	if clientPagingControl != nil {
 		logEvent = logEvent.Bool("paged", true).Uint32("page_size", clientPagingControl.PagingSize)
 	}
-	
+
 	if fromCache {
 		logEvent.Msg("Cache hit for search")
 	} else {
@@ -699,6 +701,113 @@ func (p *LDAPProxy) sendSearchDoneWithControl(state *ClientState, messageID int6
 	responseBytes := response.Bytes()
 	_, err := state.conn.Write(responseBytes)
 	return len(responseBytes), err
+}
+
+func (p *LDAPProxy) handleCompare(state *ClientState, messageID int64, compareReq *ber.Packet) error {
+	// CompareRequest ::= [APPLICATION 14] SEQUENCE {
+	//     entry           LDAPDN,
+	//     ava             AttributeValueAssertion }
+	// AttributeValueAssertion ::= SEQUENCE {
+	//     attributeDesc   AttributeDescription,
+	//     assertionValue  AssertionValue }
+
+	if len(compareReq.Children) < 2 {
+		return p.sendCompareResponse(state, messageID, ldap.LDAPResultProtocolError)
+	}
+
+	entryDN := compareReq.Children[0].Data.String()
+	if entryDN == "" {
+		p.logger.Error().Msg("Compare request with empty entry DN")
+		return p.sendCompareResponse(state, messageID, ldap.LDAPResultProtocolError)
+	}
+
+	// The second child is the AttributeValueAssertion (AVA)
+	ava := compareReq.Children[1]
+	if len(ava.Children) < 2 {
+		return p.sendCompareResponse(state, messageID, ldap.LDAPResultProtocolError)
+	}
+
+	attributeDesc := ava.Children[0].Data.String()
+	assertionValue := ava.Children[1].Data.String()
+
+	if attributeDesc == "" {
+		p.logger.Error().Msg("Compare request with empty attribute name")
+		return p.sendCompareResponse(state, messageID, ldap.LDAPResultProtocolError)
+	}
+
+	p.logger.Info().
+		Str("entry", entryDN).
+		Str("attribute", attributeDesc).
+		Msg("Compare request")
+
+	// Create dialer with timeout
+	dialer := &net.Dialer{
+		Timeout: p.config.ConnectionTimeout,
+	}
+	ldapConn, err := ldap.DialURL(ensureLDAPURL(p.config.LDAPServer), ldap.DialWithDialer(dialer))
+	if err != nil {
+		p.logger.Error().Err(err).Msg("Failed to connect to backend")
+		return p.sendCompareResponse(state, messageID, ldap.LDAPResultUnavailable)
+	}
+	defer ldapConn.Close()
+
+	// Bind to backend server with stored credentials
+	state.mu.Lock()
+	bindDN := state.backendDN
+	bindPwd := state.backendPwd
+	state.mu.Unlock()
+
+	if bindDN != "" {
+		if err := ldapConn.Bind(bindDN, bindPwd); err != nil {
+			p.logger.Error().Err(err).Msg("Backend bind failed")
+			return p.sendCompareResponse(state, messageID, ldap.LDAPResultInvalidCredentials)
+		}
+	}
+
+	// Perform compare operation on backend
+	result, err := ldapConn.Compare(entryDN, attributeDesc, assertionValue)
+	if err != nil {
+		// Check if it's an LDAP error with a specific result code
+		if ldapErr, ok := err.(*ldap.Error); ok {
+			p.logger.Error().Err(err).Uint16("result_code", ldapErr.ResultCode).Msg("Backend compare failed")
+			return p.sendCompareResponse(state, messageID, ldapErr.ResultCode)
+		}
+		p.logger.Error().Err(err).Msg("Backend compare failed")
+		return p.sendCompareResponse(state, messageID, ldap.LDAPResultOperationsError)
+	}
+
+	// Determine the result code based on compare result
+	var resultCode uint16
+	if result {
+		resultCode = ldap.LDAPResultCompareTrue
+		p.logger.Info().
+			Str("entry", entryDN).
+			Str("attribute", attributeDesc).
+			Msg("Compare result: TRUE")
+	} else {
+		resultCode = ldap.LDAPResultCompareFalse
+		p.logger.Info().
+			Str("entry", entryDN).
+			Str("attribute", attributeDesc).
+			Msg("Compare result: FALSE")
+	}
+
+	return p.sendCompareResponse(state, messageID, resultCode)
+}
+
+func (p *LDAPProxy) sendCompareResponse(state *ClientState, messageID int64, resultCode uint16) error {
+	response := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
+	response.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "Message ID"))
+
+	compareResponse := ber.Encode(ber.ClassApplication, ber.TypeConstructed, ldap.ApplicationCompareResponse, nil, "Compare Response")
+	compareResponse.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagEnumerated, int64(resultCode), "Result Code"))
+	compareResponse.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "", "Matched DN"))
+	compareResponse.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "", "Diagnostic Message"))
+
+	response.AppendChild(compareResponse)
+
+	_, err := state.conn.Write(response.Bytes())
+	return err
 }
 
 func (p *LDAPProxy) handleUnbind(state *ClientState) error {
