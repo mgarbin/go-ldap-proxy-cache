@@ -294,7 +294,9 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		return nil
 	}
 
-	p.logger.Info().Str("key", reqKey).Msg("Cache miss - querying backend")
+	if p.config.CacheEnabled {
+		p.logger.Info().Str("key", reqKey).Msg("Cache miss - querying backend")
+	}
 
 	// Start to calculate elapsed time
 	startDate := time.Now()
