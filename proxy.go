@@ -302,8 +302,9 @@ func (p *LDAPProxy) parseControlsFromSearchRequest(searchReq *ber.Packet) []ldap
 	if len(searchReq.Children) > 8 {
 		controlsPacket := searchReq.Children[8]
 		
-		// Controls should be a sequence
-		if controlsPacket.Tag == ber.TagSequence {
+		// Controls are context-specific class with tag 0
+		// In LDAP messages, controls are wrapped in a context tag
+		if controlsPacket.ClassType == ber.ClassContext && controlsPacket.Tag == 0 {
 			for _, ctrlPacket := range controlsPacket.Children {
 				if ctrl, err := ldap.DecodeControl(ctrlPacket); err == nil {
 					controls = append(controls, ctrl)
