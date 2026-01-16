@@ -10,8 +10,14 @@ proxy_addr: ":3389"
 #   - localhost:389          (defaults to ldap://localhost:389)
 ldap_server: "localhost:389"
 
+# Enable cache system (default: true)
+# When set to false, the cache system is completely disabled
+# and all requests are forwarded directly to the backend LDAP server
+cache_enabled: true
+
 # Cache TTL duration (default: 15m)
 # Examples: 15m, 1h, 30m, 2h30m
+# Only used when cache_enabled is true
 cache_ttl: 15m
 
 # Backend connection timeout (default: 10s)
@@ -24,6 +30,7 @@ client_timeout: 30s
 
 # Redis cache configuration (default: disabled)
 # When enabled, Redis will be used instead of in-memory cache
+# Note: cache_enabled must be true for Redis cache to work
 redis_enabled: false
 
 # Redis server address (default: localhost:6379)
@@ -46,6 +53,9 @@ redis_db: 0
 #
 # When using a config file, all command-line flags become optional.
 # CLI flags will override values from the YAML config file.
+#
+# To disable cache via command line:
+# ./ldap-proxy -cache-enabled=false
 #
 # To enable Redis cache via command line:
 # ./ldap-proxy -redis-enabled -redis-addr localhost:6379 -redis-db 0

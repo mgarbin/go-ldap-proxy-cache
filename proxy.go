@@ -38,7 +38,11 @@ type ClientState struct {
 func NewLDAPProxy(config *Config) (*LDAPProxy, error) {
 	var cache CacheInterface
 
-	if config.RedisEnabled {
+	if !config.CacheEnabled {
+		// Cache is completely disabled
+		cache = NewNoOpCache()
+		log.Printf("Cache system is disabled")
+	} else if config.RedisEnabled {
 		// Try to create Redis cache
 		redisCache, err := NewRedisCache(config.RedisAddr, config.RedisPassword, config.RedisDB, config.CacheTTL)
 		if err != nil {
