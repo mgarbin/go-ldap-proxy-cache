@@ -207,6 +207,10 @@ func (c *Config) String() string {
 			cacheInfo = fmt.Sprintf("enabled (in-memory, ttl=%s)", c.CacheTTL)
 		}
 	}
-	return fmt.Sprintf("ProxyAddr: %s, LDAPServer: %s, ConnectionTimeout: %s, ClientTimeout: %s, Cache: %s",
-		c.ProxyAddr, c.LDAPServer, c.ConnectionTimeout, c.ClientTimeout, cacheInfo)
+	logFormat := "console"
+	if c.LogJSON {
+		logFormat = "JSON"
+	}
+	return fmt.Sprintf("ProxyAddr: %s, LDAPServer: %s, ConnectionTimeout: %s, ClientTimeout: %s, Cache: %s, LogFormat: %s",
+		c.ProxyAddr, c.LDAPServer, c.ConnectionTimeout, c.ClientTimeout, cacheInfo, logFormat)
 }

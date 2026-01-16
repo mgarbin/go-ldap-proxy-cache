@@ -12,7 +12,7 @@ func main() {
 	// Initialize logger based on configuration
 	logger = InitLogger(config.LogJSON)
 
-	logger.Info().Msgf("Starting LDAP proxy with configuration: %s", config)
+	logger.Info().Str("config", config.String()).Msg("Starting LDAP proxy")
 
 	proxy, err := NewLDAPProxy(config)
 	if err != nil {
