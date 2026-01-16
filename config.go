@@ -20,6 +20,7 @@ type Config struct {
 	RedisAddr         string        `yaml:"redis_addr"`
 	RedisPassword     string        `yaml:"redis_password"`
 	RedisDB           int           `yaml:"redis_db"`
+	LogJSON           bool          `yaml:"log_json"`
 }
 
 func LoadConfig() *Config {
@@ -36,6 +37,7 @@ func LoadConfig() *Config {
 	// Use pointer for bool to detect if flag was explicitly set
 	cacheEnabled := flag.Bool("cache-enabled", true, "Enable cache system")
 	redisEnabled := flag.Bool("redis-enabled", false, "Enable Redis cache")
+	logJSON := flag.Bool("log-json", false, "Enable JSON logging")
 
 	flag.StringVar(&configFile, "config", "", "Path to YAML configuration file")
 	flag.StringVar(&proxyAddr, "proxy-addr", "", "Proxy listen address")
@@ -52,12 +54,16 @@ func LoadConfig() *Config {
 	// Track if cache-enabled and redis-enabled were explicitly set
 	cacheEnabledSet := false
 	redisEnabledSet := false
+	logJSONSet := false
 	flag.Visit(func(f *flag.Flag) {
 		if f.Name == "cache-enabled" {
 			cacheEnabledSet = true
 		}
 		if f.Name == "redis-enabled" {
 			redisEnabledSet = true
+		}
+		if f.Name == "log-json" {
+			logJSONSet = true
 		}
 	})
 
@@ -73,6 +79,7 @@ func LoadConfig() *Config {
 		RedisAddr:         "localhost:6379",
 		RedisPassword:     "",
 		RedisDB:           0,
+		LogJSON:           false,
 	}
 
 	// Load YAML config if provided (overwrites defaults)
@@ -107,6 +114,10 @@ func LoadConfig() *Config {
 	if redisEnabledSet {
 		config.RedisEnabled = *redisEnabled
 	}
+	// Only override log-json if it was explicitly set via CLI flag
+	if logJSONSet {
+		config.LogJSON = *logJSON
+	}
 	if redisAddr != "" {
 		config.RedisAddr = redisAddr
 	}
@@ -139,6 +150,7 @@ func loadYAMLConfig(filename string, config *Config) error {
 		RedisAddr         string        `yaml:"redis_addr"`
 		RedisPassword     string        `yaml:"redis_password"`
 		RedisDB           int           `yaml:"redis_db"`
+		LogJSON           *bool         `yaml:"log_json"`
 	}
 
 	if err := yaml.Unmarshal(data, &yamlConfig); err != nil {
@@ -167,6 +179,9 @@ func loadYAMLConfig(filename string, config *Config) error {
 	}
 	if yamlConfig.RedisEnabled != nil {
 		config.RedisEnabled = *yamlConfig.RedisEnabled
+	}
+	if yamlConfig.LogJSON != nil {
+		config.LogJSON = *yamlConfig.LogJSON
 	}
 	if yamlConfig.RedisAddr != "" {
 		config.RedisAddr = yamlConfig.RedisAddr

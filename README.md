@@ -61,6 +61,9 @@ docker run -p 3389:3389 ldap-proxy -ldap-server ldap.example.com:389
 - `-redis-addr`: Redis server address (default: `localhost:6379`, only used when Redis is enabled)
 - `-redis-password`: Redis password (default: empty, only used when Redis is enabled)
 - `-redis-db`: Redis database number (default: `0`, only used when Redis is enabled)
+- `-log-json`: Enable JSON logging format (default: `false`)
+  - When set to `true`, logs are output in JSON format for easier parsing and integration with log aggregation systems
+  - When set to `false` (default), logs are output in human-readable console format
 
 ### Cache Options
 

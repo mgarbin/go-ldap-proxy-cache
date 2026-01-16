@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"sync/atomic"
 	"time"
 
@@ -35,7 +34,7 @@ func NewRedisCache(addr, password string, db int, ttl time.Duration) (*RedisCach
 		return nil, err
 	}
 
-	log.Printf("Successfully connected to Redis at %s (db=%d)", addr, db)
+	logger.Info().Str("addr", addr).Int("db", db).Msg("Successfully connected to Redis")
 
 	return &RedisCache{
 		client: client,
@@ -54,7 +53,7 @@ func (rc *RedisCache) Get(baseDN, filter string, attributes []string, scope int)
 		return nil, false
 	} else if err != nil {
 		// Other error
-		log.Printf("Redis GET error: %v", err)
+		logger.Error().Err(err).Msg("Redis GET error")
 		atomic.AddUint64(&rc.misses, 1)
 		return nil, false
 	}
@@ -63,7 +62,7 @@ func (rc *RedisCache) Get(baseDN, filter string, attributes []string, scope int)
 	// This is the type that the proxy expects for LDAP search results
 	var entries []*ldap.Entry
 	if err := json.Unmarshal([]byte(val), &entries); err != nil {
-		log.Printf("Redis data unmarshal error: %v", err)
+		logger.Error().Err(err).Msg("Redis data unmarshal error")
 		atomic.AddUint64(&rc.misses, 1)
 		return nil, false
 	}
@@ -78,13 +77,13 @@ func (rc *RedisCache) Set(baseDN, filter string, attributes []string, scope int,
 	// Serialize the data
 	jsonData, err := json.Marshal(data)
 	if err != nil {
-		log.Printf("Redis data marshal error: %v", err)
+		logger.Error().Err(err).Msg("Redis data marshal error")
 		return
 	}
 
 	// Set with TTL
 	if err := rc.client.Set(rc.ctx, key, jsonData, rc.ttl).Err(); err != nil {
-		log.Printf("Redis SET error: %v", err)
+		logger.Error().Err(err).Msg("Redis SET error")
 	}
 }
 
@@ -100,7 +99,7 @@ func (rc *RedisCache) Stats() (hits, misses uint64, size int) {
 	// or maintain a separate counter.
 	dbSize, err := rc.client.DBSize(rc.ctx).Result()
 	if err != nil {
-		log.Printf("Redis DBSIZE error: %v", err)
+		logger.Error().Err(err).Msg("Redis DBSIZE error")
 		return hits, misses, 0
 	}
 

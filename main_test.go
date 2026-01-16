@@ -495,3 +495,80 @@ func TestConfigCacheDisabled(t *testing.T) {
 		t.Error("Expected cache to be disabled")
 	}
 }
+
+func TestLogJSON(t *testing.T) {
+	config := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheEnabled:      true,
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+		LogJSON:           true,
+	}
+
+	if !config.LogJSON {
+		t.Error("Expected LogJSON to be true")
+	}
+
+	// Test default value
+	config2 := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheEnabled:      true,
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+		LogJSON:           false,
+	}
+
+	if config2.LogJSON {
+		t.Error("Expected LogJSON to be false by default")
+	}
+}
+
+func TestYAMLConfigWithLogJSON(t *testing.T) {
+	// Create a temporary YAML config file with log_json setting
+	yamlContent := `proxy_addr: ":4389"
+ldap_server: "ldap.test.com:389"
+cache_ttl: 30m
+connection_timeout: 15s
+client_timeout: 45s
+log_json: true
+`
+
+	tmpFile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.Write([]byte(yamlContent)); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	// Test loading YAML config with log_json setting
+	config := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheEnabled:      true,
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+		LogJSON:           false,
+	}
+
+	err = loadYAMLConfig(tmpFile.Name(), config)
+	if err != nil {
+		t.Fatalf("Failed to load YAML config: %v", err)
+	}
+
+	if !config.LogJSON {
+		t.Error("Expected LogJSON to be true from YAML")
+	}
+
+	if config.ProxyAddr != ":4389" {
+		t.Errorf("Expected proxy addr :4389, got %s", config.ProxyAddr)
+	}
+}

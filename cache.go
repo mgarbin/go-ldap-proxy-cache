@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -53,7 +52,7 @@ func (c *Cache) cleanup() {
 		}
 		c.mu.Unlock()
 		if cleaned > 0 {
-			log.Printf("Cache cleanup: removed %d expired entries", cleaned)
+			logger.Info().Int("count", cleaned).Msg("Cache cleanup: removed expired entries")
 		}
 	}
 }
