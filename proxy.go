@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
@@ -42,6 +45,8 @@ type PagingStateManager struct {
 	states map[string]*PagingState
 	mu     sync.RWMutex
 	logger zerolog.Logger
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // PagingState stores the state for a paged query
@@ -53,13 +58,21 @@ type PagingState struct {
 
 // NewPagingStateManager creates a new paging state manager
 func NewPagingStateManager(logger zerolog.Logger) *PagingStateManager {
+	ctx, cancel := context.WithCancel(context.Background())
 	psm := &PagingStateManager{
 		states: make(map[string]*PagingState),
 		logger: logger,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 	// Start cleanup goroutine to remove old paging states
 	go psm.cleanupOldStates()
 	return psm
+}
+
+// Stop gracefully stops the paging state manager
+func (psm *PagingStateManager) Stop() {
+	psm.cancel()
 }
 
 // cleanupOldStates removes paging states older than 5 minutes
@@ -67,16 +80,21 @@ func (psm *PagingStateManager) cleanupOldStates() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		psm.mu.Lock()
-		now := time.Now()
-		for cookie, state := range psm.states {
-			if now.Sub(state.createdAt) > 5*time.Minute {
-				delete(psm.states, cookie)
-				psm.logger.Debug().Str("cookie", cookie).Msg("Removed expired paging state")
+	for {
+		select {
+		case <-psm.ctx.Done():
+			return
+		case <-ticker.C:
+			psm.mu.Lock()
+			now := time.Now()
+			for cookie, state := range psm.states {
+				if now.Sub(state.createdAt) > 5*time.Minute {
+					delete(psm.states, cookie)
+					psm.logger.Debug().Msg("Removed expired paging state")
+				}
 			}
+			psm.mu.Unlock()
 		}
-		psm.mu.Unlock()
 	}
 }
 
@@ -107,6 +125,18 @@ func (psm *PagingStateManager) Delete(cookie string) {
 	defer psm.mu.Unlock()
 
 	delete(psm.states, cookie)
+}
+
+// generateSecureCookie generates a cryptographically secure random cookie
+func generateSecureCookie() (string, error) {
+	// Generate 32 bytes of random data
+	randomBytes := make([]byte, 32)
+	_, err := rand.Read(randomBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate random cookie: %w", err)
+	}
+	// Encode as base64 for URL-safe string
+	return base64.URLEncoding.EncodeToString(randomBytes), nil
 }
 
 func NewLDAPProxy(config *Config, logger zerolog.Logger) (*LDAPProxy, error) {
@@ -450,8 +480,8 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 				startOffset = pagingState.offset
 				allEntries = pagingState.entries
 			} else {
-				// Cookie is invalid or expired
-				p.logger.Warn().Str("cookie", cookieStr).Msg("Invalid or expired paging cookie")
+				// Cookie is invalid or expired - log without exposing the actual cookie value
+				p.logger.Warn().Msg("Invalid or expired paging cookie received")
 				return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 			}
 		}
@@ -468,15 +498,18 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		
 		// If there are more results, generate a cookie
 		if endOffset < len(allEntries) {
-			// Generate a unique cookie for this paging session
-			cookie := fmt.Sprintf("%s-%d-%d", reqKey, time.Now().UnixNano(), endOffset)
+			// Generate a cryptographically secure random cookie
+			cookie, err := generateSecureCookie()
+			if err != nil {
+				p.logger.Error().Err(err).Msg("Failed to generate paging cookie")
+				return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
+			}
 			responseControl.SetCookie([]byte(cookie))
 			
 			// Store the paging state
 			p.pagingState.Store(cookie, allEntries, endOffset)
 			
 			p.logger.Debug().
-				Str("cookie", cookie).
 				Int("offset", endOffset).
 				Int("total", len(allEntries)).
 				Msg("Created paging cookie")

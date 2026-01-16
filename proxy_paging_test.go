@@ -166,3 +166,34 @@ func TestPagingControlGeneration(t *testing.T) {
 		t.Errorf("Expected control type %s, got %s", ldap.ControlTypePaging, control.GetControlType())
 	}
 }
+
+func TestGenerateSecureCookie(t *testing.T) {
+	// Test that secure cookies are generated
+	cookie1, err := generateSecureCookie()
+	if err != nil {
+		t.Fatalf("Failed to generate secure cookie: %v", err)
+	}
+
+	if len(cookie1) == 0 {
+		t.Error("Expected non-empty cookie")
+	}
+
+	// Test that cookies are unique
+	cookie2, err := generateSecureCookie()
+	if err != nil {
+		t.Fatalf("Failed to generate second secure cookie: %v", err)
+	}
+
+	if cookie1 == cookie2 {
+		t.Error("Expected unique cookies, got identical values")
+	}
+
+	// Test that cookies are base64 encoded (URL-safe)
+	for _, c := range cookie1 {
+		// Check if character is valid base64 URL encoding
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || 
+			(c >= '0' && c <= '9') || c == '-' || c == '_' || c == '=') {
+			t.Errorf("Cookie contains invalid base64 character: %c", c)
+		}
+	}
+}
