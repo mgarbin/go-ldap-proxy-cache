@@ -10,6 +10,7 @@ import (
 
 	ber "github.com/go-asn1-ber/asn1-ber"
 	"github.com/go-ldap/ldap/v3"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -21,6 +22,7 @@ const (
 type LDAPProxy struct {
 	config *Config
 	cache  CacheInterface
+	logger zerolog.Logger
 }
 
 type ClientState struct {
@@ -34,7 +36,7 @@ type ClientState struct {
 	mu         sync.Mutex
 }
 
-func NewLDAPProxy(config *Config) (*LDAPProxy, error) {
+func NewLDAPProxy(config *Config, logger zerolog.Logger) (*LDAPProxy, error) {
 	var cache CacheInterface
 
 	if !config.CacheEnabled {
@@ -43,7 +45,7 @@ func NewLDAPProxy(config *Config) (*LDAPProxy, error) {
 		logger.Info().Msg("Cache system is disabled")
 	} else if config.RedisEnabled {
 		// Try to create Redis cache
-		redisCache, err := NewRedisCache(config.RedisAddr, config.RedisPassword, config.RedisDB, config.CacheTTL)
+		redisCache, err := NewRedisCache(config.RedisAddr, config.RedisPassword, config.RedisDB, config.CacheTTL, logger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 		}
@@ -51,13 +53,14 @@ func NewLDAPProxy(config *Config) (*LDAPProxy, error) {
 		logger.Info().Str("addr", config.RedisAddr).Int("db", config.RedisDB).Msg("Using Redis cache")
 	} else {
 		// Use in-memory cache
-		cache = NewCache(config.CacheTTL)
+		cache = NewCache(config.CacheTTL, logger)
 		logger.Info().Msg("Using in-memory cache")
 	}
 
 	return &LDAPProxy{
 		config: config,
 		cache:  cache,
+		logger: logger,
 	}, nil
 }
 
@@ -81,9 +84,9 @@ func (p *LDAPProxy) Start() error {
 	}
 	defer listener.Close()
 
-	logger.Info().Str("proxy_addr", p.config.ProxyAddr).Msg("LDAP proxy listening")
-	logger.Info().Str("ldap_server", p.config.LDAPServer).Msg("Forwarding to LDAP server")
-	logger.Info().Dur("cache_ttl", p.config.CacheTTL).Msg("Cache TTL configured")
+	p.logger.Info().Str("proxy_addr", p.config.ProxyAddr).Msg("LDAP proxy listening")
+	p.logger.Info().Str("ldap_server", p.config.LDAPServer).Msg("Forwarding to LDAP server")
+	p.logger.Info().Dur("cache_ttl", p.config.CacheTTL).Msg("Cache TTL configured")
 
 	// Start cache statistics reporter
 	go p.reportCacheStats()
@@ -91,7 +94,7 @@ func (p *LDAPProxy) Start() error {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			logger.Error().Err(err).Msg("Failed to accept connection")
+			p.logger.Error().Err(err).Msg("Failed to accept connection")
 			continue
 		}
 
@@ -110,7 +113,7 @@ func (p *LDAPProxy) reportCacheStats() {
 		if total > 0 {
 			hitRate = float64(hits) / float64(total) * 100
 		}
-		logger.Info().
+		p.logger.Info().
 			Uint64("hits", hits).
 			Uint64("misses", misses).
 			Float64("hit_rate", hitRate).
@@ -122,7 +125,7 @@ func (p *LDAPProxy) reportCacheStats() {
 func (p *LDAPProxy) handleConnection(clientConn net.Conn) {
 	defer clientConn.Close()
 
-	logger.Info().Str("remote_addr", clientConn.RemoteAddr().String()).Msg("New connection")
+	p.logger.Info().Str("remote_addr", clientConn.RemoteAddr().String()).Msg("New connection")
 
 	state := &ClientState{
 		conn: clientConn,
@@ -137,13 +140,13 @@ func (p *LDAPProxy) handleConnection(clientConn net.Conn) {
 		packet, err := ber.ReadPacket(clientConn)
 		if err != nil {
 			if err != io.EOF {
-				logger.Error().Err(err).Msg("Failed to read LDAP packet")
+				p.logger.Error().Err(err).Msg("Failed to read LDAP packet")
 			}
 			return
 		}
 
 		if err := p.handleRequest(state, packet); err != nil {
-			logger.Error().Err(err).Msg("Error handling request")
+			p.logger.Error().Err(err).Msg("Error handling request")
 			return
 		}
 	}
@@ -165,7 +168,7 @@ func (p *LDAPProxy) handleRequest(state *ClientState, packet *ber.Packet) error 
 	case ldap.ApplicationUnbindRequest:
 		return p.handleUnbind(state)
 	default:
-		logger.Warn().Int("tag", int(protocolOp.Tag)).Msg("Unsupported LDAP operation")
+		p.logger.Warn().Int("tag", int(protocolOp.Tag)).Msg("Unsupported LDAP operation")
 		return fmt.Errorf("unsupported operation")
 	}
 }
@@ -179,7 +182,7 @@ func (p *LDAPProxy) handleBind(state *ClientState, messageID int64, bindReq *ber
 	name := string(bindReq.Children[1].Data.String())
 	password := string(bindReq.Children[2].Data.String())
 
-	logger.Info().Int64("version", version).Str("name", name).Msg("Bind request")
+	p.logger.Info().Int64("version", version).Str("name", name).Msg("Bind request")
 
 	// Create dialer with timeout
 	dialer := &net.Dialer{
@@ -187,7 +190,7 @@ func (p *LDAPProxy) handleBind(state *ClientState, messageID int64, bindReq *ber
 	}
 	ldapConn, err := ldap.DialURL(ensureLDAPURL(p.config.LDAPServer), ldap.DialWithDialer(dialer))
 	if err != nil {
-		logger.Error().Err(err).Msg("Failed to connect to backend")
+		p.logger.Error().Err(err).Msg("Failed to connect to backend")
 		return p.sendBindResponse(state, messageID, ldap.LDAPResultUnavailable)
 	}
 	defer ldapConn.Close()
@@ -195,16 +198,16 @@ func (p *LDAPProxy) handleBind(state *ClientState, messageID int64, bindReq *ber
 	if name == "" && password == "" {
 		err = ldapConn.UnauthenticatedBind("")
 		if err != nil {
-			logger.Error().Err(err).Msg("Anonymous bind failed")
+			p.logger.Error().Err(err).Msg("Anonymous bind failed")
 			return p.sendBindResponse(state, messageID, ldap.LDAPResultInvalidCredentials)
 		}
-		logger.Info().Msg("Anonymous bind successful")
+		p.logger.Info().Msg("Anonymous bind successful")
 		return p.sendBindResponse(state, messageID, ldap.LDAPResultSuccess)
 	}
 
 	err = ldapConn.Bind(name, password)
 	if err != nil {
-		logger.Error().Err(err).Msg("Backend bind failed")
+		p.logger.Error().Err(err).Msg("Backend bind failed")
 		return p.sendBindResponse(state, messageID, ldap.LDAPResultInvalidCredentials)
 	}
 
@@ -213,7 +216,7 @@ func (p *LDAPProxy) handleBind(state *ClientState, messageID int64, bindReq *ber
 	state.backendPwd = password
 	state.mu.Unlock()
 
-	logger.Info().Str("name", name).Msg("Bind successful")
+	p.logger.Info().Str("name", name).Msg("Bind successful")
 	return p.sendBindResponse(state, messageID, ldap.LDAPResultSuccess)
 }
 
@@ -251,7 +254,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 
 	filterStr, err := ldap.DecompileFilter(filterPacket)
 	if err != nil {
-		logger.Error().Err(err).Msg("Failed to decompile filter")
+		p.logger.Error().Err(err).Msg("Failed to decompile filter")
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultProtocolError)
 	}
 
@@ -259,7 +262,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	reqKey := generateCacheKey(baseDN, filterStr, attributes, scope)
 
 	if cachedData, found := p.cache.Get(baseDN, filterStr, attributes, scope); found {
-		logger.Info().
+		p.logger.Info().
 			Str("key", reqKey).
 			Str("host", state.conn.RemoteAddr().String()).
 			Str("base", baseDN).
@@ -275,7 +278,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultSuccess)
 	}
 
-	logger.Info().Str("key", reqKey).Msg("Cache miss - querying backend")
+	p.logger.Info().Str("key", reqKey).Msg("Cache miss - querying backend")
 
 	// Start to calculate elapsed time
 	startDate := time.Now()
@@ -286,7 +289,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	}
 	ldapConn, err := ldap.DialURL(ensureLDAPURL(p.config.LDAPServer), ldap.DialWithDialer(dialer))
 	if err != nil {
-		logger.Error().Err(err).Str("key", reqKey).Msg("Failed to connect to backend")
+		p.logger.Error().Err(err).Str("key", reqKey).Msg("Failed to connect to backend")
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultUnavailable)
 	}
 	defer ldapConn.Close()
@@ -298,14 +301,14 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 
 	if bindDN != "" {
 		if err := ldapConn.Bind(bindDN, bindPwd); err != nil {
-			logger.Error().Err(err).Str("key", reqKey).Msg("Backend bind failed")
+			p.logger.Error().Err(err).Str("key", reqKey).Msg("Backend bind failed")
 			return p.sendSearchDone(state, messageID, ldap.LDAPResultInvalidCredentials)
 		}
 	}
 
 	entries, err := p.searchBackendWithPaging(ldapConn, baseDN, scope, filterStr, attributes)
 	if err != nil {
-		logger.Error().Err(err).Str("key", reqKey).Msg("Backend search failed")
+		p.logger.Error().Err(err).Str("key", reqKey).Msg("Backend search failed")
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 	}
 
@@ -319,7 +322,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	// Convert duration to milliseconds (as an integer value)
 	durationMilliseconds := duration.Milliseconds() // This gives an integer value
 
-	logger.Info().
+	p.logger.Info().
 		Str("key", reqKey).
 		Str("host", state.conn.RemoteAddr().String()).
 		Str("base", baseDN).
@@ -379,7 +382,7 @@ func (p *LDAPProxy) searchBackendWithPaging(conn *ldap.Conn, baseDN string, scop
 		searchRequest.Controls = []ldap.Control{nextPageControl}
 	}
 
-	logger.Info().Int("count", len(allEntries)).Msg("Retrieved entries from backend")
+	p.logger.Info().Int("count", len(allEntries)).Msg("Retrieved entries from backend")
 	return allEntries, nil
 }
 
@@ -426,6 +429,6 @@ func (p *LDAPProxy) sendSearchDone(state *ClientState, messageID int64, resultCo
 }
 
 func (p *LDAPProxy) handleUnbind(state *ClientState) error {
-	logger.Info().Msg("Unbind request received")
+	p.logger.Info().Msg("Unbind request received")
 	return io.EOF
 }

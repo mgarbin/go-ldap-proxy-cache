@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-ldap/ldap/v3"
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog"
 )
 
 // RedisCache implements CacheInterface using Redis as the backend
@@ -17,10 +18,11 @@ type RedisCache struct {
 	hits   uint64
 	misses uint64
 	ctx    context.Context
+	logger zerolog.Logger
 }
 
 // NewRedisCache creates a new Redis-backed cache
-func NewRedisCache(addr, password string, db int, ttl time.Duration) (*RedisCache, error) {
+func NewRedisCache(addr, password string, db int, ttl time.Duration, logger zerolog.Logger) (*RedisCache, error) {
 	client := redis.NewClient(&redis.Options{
 		Addr:     addr,
 		Password: password,
@@ -40,6 +42,7 @@ func NewRedisCache(addr, password string, db int, ttl time.Duration) (*RedisCach
 		client: client,
 		ttl:    ttl,
 		ctx:    ctx,
+		logger: logger,
 	}, nil
 }
 
@@ -53,7 +56,7 @@ func (rc *RedisCache) Get(baseDN, filter string, attributes []string, scope int)
 		return nil, false
 	} else if err != nil {
 		// Other error
-		logger.Error().Err(err).Msg("Redis GET error")
+		rc.logger.Error().Err(err).Msg("Redis GET error")
 		atomic.AddUint64(&rc.misses, 1)
 		return nil, false
 	}
@@ -62,7 +65,7 @@ func (rc *RedisCache) Get(baseDN, filter string, attributes []string, scope int)
 	// This is the type that the proxy expects for LDAP search results
 	var entries []*ldap.Entry
 	if err := json.Unmarshal([]byte(val), &entries); err != nil {
-		logger.Error().Err(err).Msg("Redis data unmarshal error")
+		rc.logger.Error().Err(err).Msg("Redis data unmarshal error")
 		atomic.AddUint64(&rc.misses, 1)
 		return nil, false
 	}
@@ -77,13 +80,13 @@ func (rc *RedisCache) Set(baseDN, filter string, attributes []string, scope int,
 	// Serialize the data
 	jsonData, err := json.Marshal(data)
 	if err != nil {
-		logger.Error().Err(err).Msg("Redis data marshal error")
+		rc.logger.Error().Err(err).Msg("Redis data marshal error")
 		return
 	}
 
 	// Set with TTL
 	if err := rc.client.Set(rc.ctx, key, jsonData, rc.ttl).Err(); err != nil {
-		logger.Error().Err(err).Msg("Redis SET error")
+		rc.logger.Error().Err(err).Msg("Redis SET error")
 	}
 }
 
@@ -99,7 +102,7 @@ func (rc *RedisCache) Stats() (hits, misses uint64, size int) {
 	// or maintain a separate counter.
 	dbSize, err := rc.client.DBSize(rc.ctx).Result()
 	if err != nil {
-		logger.Error().Err(err).Msg("Redis DBSIZE error")
+		rc.logger.Error().Err(err).Msg("Redis DBSIZE error")
 		return hits, misses, 0
 	}
 

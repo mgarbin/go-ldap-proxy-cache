@@ -1,13 +1,21 @@
 package main
 
 import (
+	"io"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
+// getTestLogger creates a logger for tests that discards output
+func getTestLogger() zerolog.Logger {
+	return zerolog.New(io.Discard)
+}
+
 func TestCache(t *testing.T) {
-	cache := NewCache(100 * time.Millisecond)
+	cache := NewCache(100*time.Millisecond, getTestLogger())
 
 	// Test basic set and get
 	baseDN := "dc=example,dc=com"
