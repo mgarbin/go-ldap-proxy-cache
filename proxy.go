@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strings"
 	"sync"
@@ -11,6 +10,7 @@ import (
 
 	ber "github.com/go-asn1-ber/asn1-ber"
 	"github.com/go-ldap/ldap/v3"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -22,6 +22,7 @@ const (
 type LDAPProxy struct {
 	config *Config
 	cache  CacheInterface
+	logger zerolog.Logger
 }
 
 type ClientState struct {
@@ -35,30 +36,31 @@ type ClientState struct {
 	mu         sync.Mutex
 }
 
-func NewLDAPProxy(config *Config) (*LDAPProxy, error) {
+func NewLDAPProxy(config *Config, logger zerolog.Logger) (*LDAPProxy, error) {
 	var cache CacheInterface
 
 	if !config.CacheEnabled {
 		// Cache is completely disabled
 		cache = NewNoOpCache()
-		log.Printf("Cache system is disabled")
+		logger.Info().Msg("Cache system is disabled")
 	} else if config.RedisEnabled {
 		// Try to create Redis cache
-		redisCache, err := NewRedisCache(config.RedisAddr, config.RedisPassword, config.RedisDB, config.CacheTTL)
+		redisCache, err := NewRedisCache(config.RedisAddr, config.RedisPassword, config.RedisDB, config.CacheTTL, logger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 		}
 		cache = redisCache
-		log.Printf("Using Redis cache at %s (db=%d)", config.RedisAddr, config.RedisDB)
+		logger.Info().Str("addr", config.RedisAddr).Int("db", config.RedisDB).Msg("Using Redis cache")
 	} else {
 		// Use in-memory cache
-		cache = NewCache(config.CacheTTL)
-		log.Printf("Using in-memory cache")
+		cache = NewCache(config.CacheTTL, logger)
+		logger.Info().Msg("Using in-memory cache")
 	}
 
 	return &LDAPProxy{
 		config: config,
 		cache:  cache,
+		logger: logger,
 	}, nil
 }
 
@@ -82,9 +84,9 @@ func (p *LDAPProxy) Start() error {
 	}
 	defer listener.Close()
 
-	log.Printf("LDAP proxy listening on %s", p.config.ProxyAddr)
-	log.Printf("Forwarding to LDAP server: %s", p.config.LDAPServer)
-	log.Printf("Cache TTL: %s", p.config.CacheTTL)
+	p.logger.Info().Str("proxy_addr", p.config.ProxyAddr).Msg("LDAP proxy listening")
+	p.logger.Info().Str("ldap_server", p.config.LDAPServer).Msg("Forwarding to LDAP server")
+	p.logger.Info().Dur("cache_ttl", p.config.CacheTTL).Msg("Cache TTL configured")
 
 	// Start cache statistics reporter
 	go p.reportCacheStats()
@@ -92,7 +94,7 @@ func (p *LDAPProxy) Start() error {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Printf("Failed to accept connection: %v", err)
+			p.logger.Error().Err(err).Msg("Failed to accept connection")
 			continue
 		}
 
@@ -111,14 +113,19 @@ func (p *LDAPProxy) reportCacheStats() {
 		if total > 0 {
 			hitRate = float64(hits) / float64(total) * 100
 		}
-		log.Printf("Cache stats: hits=%d, misses=%d, hit_rate=%.2f%%, entries=%d", hits, misses, hitRate, size)
+		p.logger.Info().
+			Uint64("hits", hits).
+			Uint64("misses", misses).
+			Float64("hit_rate", hitRate).
+			Int("entries", size).
+			Msg("Cache stats")
 	}
 }
 
 func (p *LDAPProxy) handleConnection(clientConn net.Conn) {
 	defer clientConn.Close()
 
-	log.Printf("New connection from %s", clientConn.RemoteAddr())
+	p.logger.Info().Str("remote_addr", clientConn.RemoteAddr().String()).Msg("New connection")
 
 	state := &ClientState{
 		conn: clientConn,
@@ -133,13 +140,13 @@ func (p *LDAPProxy) handleConnection(clientConn net.Conn) {
 		packet, err := ber.ReadPacket(clientConn)
 		if err != nil {
 			if err != io.EOF {
-				log.Printf("Failed to read LDAP packet: %v", err)
+				p.logger.Error().Err(err).Msg("Failed to read LDAP packet")
 			}
 			return
 		}
 
 		if err := p.handleRequest(state, packet); err != nil {
-			log.Printf("Error handling request: %v", err)
+			p.logger.Error().Err(err).Msg("Error handling request")
 			return
 		}
 	}
@@ -161,7 +168,7 @@ func (p *LDAPProxy) handleRequest(state *ClientState, packet *ber.Packet) error 
 	case ldap.ApplicationUnbindRequest:
 		return p.handleUnbind(state)
 	default:
-		log.Printf("Unsupported LDAP operation: tag %d", protocolOp.Tag)
+		p.logger.Warn().Int("tag", int(protocolOp.Tag)).Msg("Unsupported LDAP operation")
 		return fmt.Errorf("unsupported operation")
 	}
 }
@@ -175,7 +182,7 @@ func (p *LDAPProxy) handleBind(state *ClientState, messageID int64, bindReq *ber
 	name := string(bindReq.Children[1].Data.String())
 	password := string(bindReq.Children[2].Data.String())
 
-	log.Printf("Bind request: version=%d, name=%s", version, name)
+	p.logger.Info().Int64("version", version).Str("name", name).Msg("Bind request")
 
 	// Create dialer with timeout
 	dialer := &net.Dialer{
@@ -183,7 +190,7 @@ func (p *LDAPProxy) handleBind(state *ClientState, messageID int64, bindReq *ber
 	}
 	ldapConn, err := ldap.DialURL(ensureLDAPURL(p.config.LDAPServer), ldap.DialWithDialer(dialer))
 	if err != nil {
-		log.Printf("Failed to connect to backend: %v", err)
+		p.logger.Error().Err(err).Msg("Failed to connect to backend")
 		return p.sendBindResponse(state, messageID, ldap.LDAPResultUnavailable)
 	}
 	defer ldapConn.Close()
@@ -191,16 +198,16 @@ func (p *LDAPProxy) handleBind(state *ClientState, messageID int64, bindReq *ber
 	if name == "" && password == "" {
 		err = ldapConn.UnauthenticatedBind("")
 		if err != nil {
-			log.Printf("Anonymous bind failed: %v", err)
+			p.logger.Error().Err(err).Msg("Anonymous bind failed")
 			return p.sendBindResponse(state, messageID, ldap.LDAPResultInvalidCredentials)
 		}
-		log.Printf("Anonymous bind successful")
+		p.logger.Info().Msg("Anonymous bind successful")
 		return p.sendBindResponse(state, messageID, ldap.LDAPResultSuccess)
 	}
 
 	err = ldapConn.Bind(name, password)
 	if err != nil {
-		log.Printf("Backend bind failed: %v", err)
+		p.logger.Error().Err(err).Msg("Backend bind failed")
 		return p.sendBindResponse(state, messageID, ldap.LDAPResultInvalidCredentials)
 	}
 
@@ -209,7 +216,7 @@ func (p *LDAPProxy) handleBind(state *ClientState, messageID int64, bindReq *ber
 	state.backendPwd = password
 	state.mu.Unlock()
 
-	log.Printf("Bind successful for: %s", name)
+	p.logger.Info().Str("name", name).Msg("Bind successful")
 	return p.sendBindResponse(state, messageID, ldap.LDAPResultSuccess)
 }
 
@@ -247,7 +254,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 
 	filterStr, err := ldap.DecompileFilter(filterPacket)
 	if err != nil {
-		log.Printf("Failed to decompile filter: %v", err)
+		p.logger.Error().Err(err).Msg("Failed to decompile filter")
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultProtocolError)
 	}
 
@@ -255,7 +262,13 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	reqKey := generateCacheKey(baseDN, filterStr, attributes, scope)
 
 	if cachedData, found := p.cache.Get(baseDN, filterStr, attributes, scope); found {
-		log.Printf("[%s] Cache hit for search : host=%s, base=%s, scope=%d, filter=%s", reqKey, state.conn.RemoteAddr().String(), baseDN, scope, filterStr)
+		p.logger.Info().
+			Str("key", reqKey).
+			Str("host", state.conn.RemoteAddr().String()).
+			Str("base", baseDN).
+			Int("scope", scope).
+			Str("filter", filterStr).
+			Msg("Cache hit for search")
 		entries := cachedData.([]*ldap.Entry)
 		for _, entry := range entries {
 			if err := p.sendSearchEntry(state, messageID, entry); err != nil {
@@ -265,7 +278,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultSuccess)
 	}
 
-	log.Printf("[%s] Cache miss - querying backend", reqKey)
+	p.logger.Info().Str("key", reqKey).Msg("Cache miss - querying backend")
 
 	// Start to calculate elapsed time
 	startDate := time.Now()
@@ -276,7 +289,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	}
 	ldapConn, err := ldap.DialURL(ensureLDAPURL(p.config.LDAPServer), ldap.DialWithDialer(dialer))
 	if err != nil {
-		log.Printf("[%s] Failed to connect to backend: %v", reqKey, err)
+		p.logger.Error().Err(err).Str("key", reqKey).Msg("Failed to connect to backend")
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultUnavailable)
 	}
 	defer ldapConn.Close()
@@ -288,14 +301,14 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 
 	if bindDN != "" {
 		if err := ldapConn.Bind(bindDN, bindPwd); err != nil {
-			log.Printf("[%s] Backend bind failed: %v", reqKey, err)
+			p.logger.Error().Err(err).Str("key", reqKey).Msg("Backend bind failed")
 			return p.sendSearchDone(state, messageID, ldap.LDAPResultInvalidCredentials)
 		}
 	}
 
 	entries, err := p.searchBackendWithPaging(ldapConn, baseDN, scope, filterStr, attributes)
 	if err != nil {
-		log.Printf("[%s] Backend search failed: %v", reqKey, err)
+		p.logger.Error().Err(err).Str("key", reqKey).Msg("Backend search failed")
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 	}
 
@@ -309,7 +322,14 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	// Convert duration to milliseconds (as an integer value)
 	durationMilliseconds := duration.Milliseconds() // This gives an integer value
 
-	log.Printf("[%s] Search request : host=%s, base=%s, scope=%d, filter=%s, elapsed=%d", reqKey, state.conn.RemoteAddr().String(), baseDN, scope, filterStr, durationMilliseconds)
+	p.logger.Info().
+		Str("key", reqKey).
+		Str("host", state.conn.RemoteAddr().String()).
+		Str("base", baseDN).
+		Int("scope", scope).
+		Str("filter", filterStr).
+		Int64("elapsed_ms", durationMilliseconds).
+		Msg("Search request")
 
 	for _, entry := range entries {
 		if err := p.sendSearchEntry(state, messageID, entry); err != nil {
@@ -362,7 +382,7 @@ func (p *LDAPProxy) searchBackendWithPaging(conn *ldap.Conn, baseDN string, scop
 		searchRequest.Controls = []ldap.Control{nextPageControl}
 	}
 
-	log.Printf("Retrieved %d entries from backend", len(allEntries))
+	p.logger.Info().Int("count", len(allEntries)).Msg("Retrieved entries from backend")
 	return allEntries, nil
 }
 
@@ -409,6 +429,6 @@ func (p *LDAPProxy) sendSearchDone(state *ClientState, messageID int64, resultCo
 }
 
 func (p *LDAPProxy) handleUnbind(state *ClientState) error {
-	log.Printf("Unbind request received")
+	p.logger.Info().Msg("Unbind request received")
 	return io.EOF
 }

@@ -1,20 +1,19 @@
 package main
 
-import (
-	"log"
-)
-
 func main() {
 	config := LoadConfig()
 
-	log.Printf("Starting LDAP proxy with configuration: %s", config)
+	// Initialize logger based on configuration
+	logger := InitLogger(config.LogJSON)
 
-	proxy, err := NewLDAPProxy(config)
+	logger.Info().Str("config", config.String()).Msg("Starting LDAP proxy")
+
+	proxy, err := NewLDAPProxy(config, logger)
 	if err != nil {
-		log.Fatalf("Failed to create proxy: %v", err)
+		logger.Fatal().Err(err).Msg("Failed to create proxy")
 	}
 
 	if err := proxy.Start(); err != nil {
-		log.Fatalf("Failed to start proxy: %v", err)
+		logger.Fatal().Err(err).Msg("Failed to start proxy")
 	}
 }

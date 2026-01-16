@@ -1,10 +1,11 @@
 package main
 
 import (
-	"log"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 // CacheInterface defines the contract for cache implementations
@@ -26,12 +27,14 @@ type Cache struct {
 	ttl     time.Duration
 	hits    uint64
 	misses  uint64
+	logger  zerolog.Logger
 }
 
-func NewCache(ttl time.Duration) *Cache {
+func NewCache(ttl time.Duration, logger zerolog.Logger) *Cache {
 	c := &Cache{
 		entries: make(map[string]*CacheEntry),
 		ttl:     ttl,
+		logger:  logger,
 	}
 	go c.cleanup()
 	return c
@@ -53,7 +56,7 @@ func (c *Cache) cleanup() {
 		}
 		c.mu.Unlock()
 		if cleaned > 0 {
-			log.Printf("Cache cleanup: removed %d expired entries", cleaned)
+			c.logger.Info().Int("count", cleaned).Msg("Cache cleanup: removed expired entries")
 		}
 	}
 }

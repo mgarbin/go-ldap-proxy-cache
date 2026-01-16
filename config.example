@@ -11,8 +11,14 @@
 # Examples: 15m, 1h, 30m, 2h30m
 # -cache-ttl 15m
 
+# Enable JSON logging format (default: false)
+# -log-json
+
 # Example usage:
 # ./ldap-proxy -proxy-addr :3389 -ldap-server ldap.example.com:389 -cache-ttl 15m
+#
+# Example with JSON logging:
+# ./ldap-proxy -log-json
 
 # Note: The proxy acts as a transparent proxy, forwarding client credentials
 # to the backend LDAP server. Clients should authenticate directly through the proxy.

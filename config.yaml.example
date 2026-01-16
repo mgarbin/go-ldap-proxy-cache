@@ -45,6 +45,11 @@ redis_password: ""
 # Only used when redis_enabled is true
 redis_db: 0
 
+# Enable JSON logging format (default: false)
+# When true, logs are output in JSON format for easier parsing and integration
+# with log aggregation systems. When false, logs use human-readable console format.
+log_json: false
+
 # Example usage:
 # ./ldap-proxy -config config.yaml
 #
@@ -59,3 +64,6 @@ redis_db: 0
 #
 # To enable Redis cache via command line:
 # ./ldap-proxy -redis-enabled -redis-addr localhost:6379 -redis-db 0
+#
+# To enable JSON logging via command line:
+# ./ldap-proxy -log-json
