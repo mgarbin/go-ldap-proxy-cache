@@ -4,7 +4,6 @@ import (
 	"os"
 
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 )
 
 // InitLogger initializes the global logger based on the configuration
@@ -15,5 +14,5 @@ func InitLogger(logJSON bool) zerolog.Logger {
 		return zerolog.New(os.Stdout).With().Timestamp().Logger()
 	}
 	// Console output with human-readable format
-	return log.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "15:04:05"})
+	return zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "15:04:05"}).With().Timestamp().Logger()
 }
