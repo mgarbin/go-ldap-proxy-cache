@@ -127,7 +127,20 @@ func loadYAMLConfig(filename string, config *Config) error {
 	}
 
 	// Create a temporary struct to hold YAML values
-	var yamlConfig Config
+	// Use pointers for bool fields to distinguish between "not set" and "false"
+	var yamlConfig struct {
+		ProxyAddr         string        `yaml:"proxy_addr"`
+		LDAPServer        string        `yaml:"ldap_server"`
+		CacheEnabled      *bool         `yaml:"cache_enabled"`
+		CacheTTL          time.Duration `yaml:"cache_ttl"`
+		ConnectionTimeout time.Duration `yaml:"connection_timeout"`
+		ClientTimeout     time.Duration `yaml:"client_timeout"`
+		RedisEnabled      *bool         `yaml:"redis_enabled"`
+		RedisAddr         string        `yaml:"redis_addr"`
+		RedisPassword     string        `yaml:"redis_password"`
+		RedisDB           int           `yaml:"redis_db"`
+	}
+
 	if err := yaml.Unmarshal(data, &yamlConfig); err != nil {
 		return fmt.Errorf("failed to parse YAML config: %w", err)
 	}
@@ -148,9 +161,13 @@ func loadYAMLConfig(filename string, config *Config) error {
 	if yamlConfig.ClientTimeout != 0 {
 		config.ClientTimeout = yamlConfig.ClientTimeout
 	}
-	// For bool, always use YAML value (false or true)
-	config.CacheEnabled = yamlConfig.CacheEnabled
-	config.RedisEnabled = yamlConfig.RedisEnabled
+	// For bool pointers, only override if explicitly set in YAML
+	if yamlConfig.CacheEnabled != nil {
+		config.CacheEnabled = *yamlConfig.CacheEnabled
+	}
+	if yamlConfig.RedisEnabled != nil {
+		config.RedisEnabled = *yamlConfig.RedisEnabled
+	}
 	if yamlConfig.RedisAddr != "" {
 		config.RedisAddr = yamlConfig.RedisAddr
 	}
@@ -159,7 +176,7 @@ func loadYAMLConfig(filename string, config *Config) error {
 	}
 	// For RedisDB, only override if Redis is enabled or value is non-zero
 	// This allows explicit 0 when Redis is enabled, but keeps default when Redis is disabled
-	if yamlConfig.RedisEnabled || yamlConfig.RedisDB != 0 {
+	if (yamlConfig.RedisEnabled != nil && *yamlConfig.RedisEnabled) || yamlConfig.RedisDB != 0 {
 		config.RedisDB = yamlConfig.RedisDB
 	}
 

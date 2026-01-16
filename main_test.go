@@ -196,9 +196,11 @@ ldap_server: "ldap.test.com:389"
 	config := &Config{
 		ProxyAddr:         ":3389",
 		LDAPServer:        "localhost:389",
+		CacheEnabled:      true,
 		CacheTTL:          15 * time.Minute,
 		ConnectionTimeout: 10 * time.Second,
 		ClientTimeout:     30 * time.Second,
+		RedisEnabled:      false,
 	}
 
 	err = loadYAMLConfig(tmpFile.Name(), config)
@@ -226,6 +228,15 @@ ldap_server: "ldap.test.com:389"
 
 	if config.ClientTimeout != 30*time.Second {
 		t.Errorf("Expected client timeout 30s (default), got %v", config.ClientTimeout)
+	}
+
+	// Boolean fields should keep their defaults when not present in YAML
+	if !config.CacheEnabled {
+		t.Error("Expected cache to remain enabled (default) when not specified in YAML")
+	}
+
+	if config.RedisEnabled {
+		t.Error("Expected Redis to remain disabled (default) when not specified in YAML")
 	}
 }
 
