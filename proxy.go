@@ -715,7 +715,7 @@ func (p *LDAPProxy) handleCompare(state *ClientState, messageID int64, compareRe
 		return p.sendCompareResponse(state, messageID, ldap.LDAPResultProtocolError)
 	}
 
-	entryDN := string(compareReq.Children[0].ByteValue)
+	entryDN := string(compareReq.Children[0].Data.String())
 
 	// The second child is the AttributeValueAssertion (AVA)
 	ava := compareReq.Children[1]
@@ -723,8 +723,8 @@ func (p *LDAPProxy) handleCompare(state *ClientState, messageID int64, compareRe
 		return p.sendCompareResponse(state, messageID, ldap.LDAPResultProtocolError)
 	}
 
-	attributeDesc := string(ava.Children[0].ByteValue)
-	assertionValue := string(ava.Children[1].ByteValue)
+	attributeDesc := string(ava.Children[0].Data.String())
+	assertionValue := string(ava.Children[1].Data.String())
 
 	p.logger.Info().
 		Str("entry", entryDN).
