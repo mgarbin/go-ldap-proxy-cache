@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 
@@ -24,8 +25,11 @@ func InitLogger(logJSON bool, logFile string) (zerolog.Logger, func(), error) {
 		}
 		writer = file
 		// Return cleanup function to close the file
+		// Note: We write errors to stderr since we can't use the logger during cleanup
 		cleanup = func() {
-			file.Close()
+			if err := file.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error closing log file: %v\n", err)
+			}
 		}
 	} else {
 		writer = os.Stdout
