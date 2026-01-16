@@ -312,6 +312,46 @@ func TestRedisConfig(t *testing.T) {
 	}
 }
 
+func TestNoOpCache(t *testing.T) {
+	cache := NewNoOpCache()
+
+	// Test that Get always returns a miss
+	baseDN := "dc=example,dc=com"
+	filter := "(uid=test)"
+	attributes := []string{"cn", "mail"}
+	scope := 2
+	data := "test data"
+
+	// Set some data (should be ignored)
+	cache.Set(baseDN, filter, attributes, scope, data)
+
+	// Try to get the data back (should always miss)
+	result, found := cache.Get(baseDN, filter, attributes, scope)
+	if found {
+		t.Error("NoOpCache should always return cache miss")
+	}
+	if result != nil {
+		t.Error("NoOpCache should always return nil data")
+	}
+
+	// Test statistics (should all be zero)
+	hits, misses, size := cache.Stats()
+	if hits != 0 {
+		t.Errorf("Expected 0 hits, got %d", hits)
+	}
+	if misses != 0 {
+		t.Errorf("Expected 0 misses, got %d", misses)
+	}
+	if size != 0 {
+		t.Errorf("Expected 0 size, got %d", size)
+	}
+
+	// Test Close (should not error)
+	if err := cache.Close(); err != nil {
+		t.Errorf("NoOpCache.Close() should not return error, got %v", err)
+	}
+}
+
 func TestYAMLConfigWithRedis(t *testing.T) {
 	// Create a temporary YAML config file with Redis settings
 	yamlContent := `proxy_addr: ":4389"
@@ -340,6 +380,7 @@ redis_db: 2
 	config := &Config{
 		ProxyAddr:         ":3389",
 		LDAPServer:        "localhost:389",
+		CacheEnabled:      true,
 		CacheTTL:          15 * time.Minute,
 		ConnectionTimeout: 10 * time.Second,
 		ClientTimeout:     30 * time.Second,
@@ -368,5 +409,78 @@ redis_db: 2
 
 	if config.RedisDB != 2 {
 		t.Errorf("Expected Redis DB 2, got %d", config.RedisDB)
+	}
+}
+
+func TestYAMLConfigCacheDisabled(t *testing.T) {
+	// Create a temporary YAML config file with cache disabled
+	yamlContent := `proxy_addr: ":4389"
+ldap_server: "ldap.test.com:389"
+cache_enabled: false
+cache_ttl: 30m
+`
+
+	tmpFile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.Write([]byte(yamlContent)); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	// Test loading YAML config with cache disabled
+	config := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheEnabled:      true,
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+	}
+
+	err = loadYAMLConfig(tmpFile.Name(), config)
+	if err != nil {
+		t.Fatalf("Failed to load YAML config: %v", err)
+	}
+
+	if config.CacheEnabled {
+		t.Error("Expected cache to be disabled from YAML")
+	}
+
+	if config.ProxyAddr != ":4389" {
+		t.Errorf("Expected proxy addr :4389, got %s", config.ProxyAddr)
+	}
+}
+
+func TestConfigCacheEnabled(t *testing.T) {
+	config := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheEnabled:      true,
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+	}
+
+	if !config.CacheEnabled {
+		t.Error("Expected cache to be enabled by default")
+	}
+}
+
+func TestConfigCacheDisabled(t *testing.T) {
+	config := &Config{
+		ProxyAddr:         ":3389",
+		LDAPServer:        "localhost:389",
+		CacheEnabled:      false,
+		CacheTTL:          15 * time.Minute,
+		ConnectionTimeout: 10 * time.Second,
+		ClientTimeout:     30 * time.Second,
+	}
+
+	if config.CacheEnabled {
+		t.Error("Expected cache to be disabled")
 	}
 }

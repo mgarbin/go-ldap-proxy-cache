@@ -12,6 +12,7 @@ import (
 type Config struct {
 	ProxyAddr         string        `yaml:"proxy_addr"`
 	LDAPServer        string        `yaml:"ldap_server"`
+	CacheEnabled      bool          `yaml:"cache_enabled"`
 	CacheTTL          time.Duration `yaml:"cache_ttl"`
 	ConnectionTimeout time.Duration `yaml:"connection_timeout"`
 	ClientTimeout     time.Duration `yaml:"client_timeout"`
@@ -33,6 +34,7 @@ func LoadConfig() *Config {
 	var redisDB int
 
 	// Use pointer for bool to detect if flag was explicitly set
+	cacheEnabled := flag.Bool("cache-enabled", true, "Enable cache system")
 	redisEnabled := flag.Bool("redis-enabled", false, "Enable Redis cache")
 
 	flag.StringVar(&configFile, "config", "", "Path to YAML configuration file")
@@ -47,9 +49,13 @@ func LoadConfig() *Config {
 
 	flag.Parse()
 
-	// Track if redis-enabled was explicitly set
+	// Track if cache-enabled and redis-enabled were explicitly set
+	cacheEnabledSet := false
 	redisEnabledSet := false
 	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "cache-enabled" {
+			cacheEnabledSet = true
+		}
 		if f.Name == "redis-enabled" {
 			redisEnabledSet = true
 		}
@@ -59,6 +65,7 @@ func LoadConfig() *Config {
 	config := &Config{
 		ProxyAddr:         ":3389",
 		LDAPServer:        "localhost:389",
+		CacheEnabled:      true,
 		CacheTTL:          15 * time.Minute,
 		ConnectionTimeout: 10 * time.Second,
 		ClientTimeout:     30 * time.Second,
@@ -91,6 +98,10 @@ func LoadConfig() *Config {
 	}
 	if clientTimeout != 0 {
 		config.ClientTimeout = clientTimeout
+	}
+	// Only override cache-enabled if it was explicitly set via CLI flag
+	if cacheEnabledSet {
+		config.CacheEnabled = *cacheEnabled
 	}
 	// Only override redis-enabled if it was explicitly set via CLI flag
 	if redisEnabledSet {
@@ -138,6 +149,7 @@ func loadYAMLConfig(filename string, config *Config) error {
 		config.ClientTimeout = yamlConfig.ClientTimeout
 	}
 	// For bool, always use YAML value (false or true)
+	config.CacheEnabled = yamlConfig.CacheEnabled
 	config.RedisEnabled = yamlConfig.RedisEnabled
 	if yamlConfig.RedisAddr != "" {
 		config.RedisAddr = yamlConfig.RedisAddr
@@ -155,10 +167,14 @@ func loadYAMLConfig(filename string, config *Config) error {
 }
 
 func (c *Config) String() string {
-	redisInfo := "disabled"
-	if c.RedisEnabled {
-		redisInfo = fmt.Sprintf("enabled (addr=%s, db=%d)", c.RedisAddr, c.RedisDB)
+	cacheInfo := "disabled"
+	if c.CacheEnabled {
+		if c.RedisEnabled {
+			cacheInfo = fmt.Sprintf("enabled (Redis: addr=%s, db=%d, ttl=%s)", c.RedisAddr, c.RedisDB, c.CacheTTL)
+		} else {
+			cacheInfo = fmt.Sprintf("enabled (in-memory, ttl=%s)", c.CacheTTL)
+		}
 	}
-	return fmt.Sprintf("ProxyAddr: %s, LDAPServer: %s, CacheTTL: %s, ConnectionTimeout: %s, ClientTimeout: %s, Redis: %s",
-		c.ProxyAddr, c.LDAPServer, c.CacheTTL, c.ConnectionTimeout, c.ClientTimeout, redisInfo)
+	return fmt.Sprintf("ProxyAddr: %s, LDAPServer: %s, ConnectionTimeout: %s, ClientTimeout: %s, Cache: %s",
+		c.ProxyAddr, c.LDAPServer, c.ConnectionTimeout, c.ClientTimeout, cacheInfo)
 }

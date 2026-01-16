@@ -52,6 +52,8 @@ docker run -p 3389:3389 ldap-proxy -ldap-server ldap.example.com:389
   - Can be specified as `host:port` (defaults to `ldap://`) or with protocol prefix:
     - `ldap://host:port` - unencrypted LDAP (typically port 389)
     - `ldaps://host:port` - LDAP over TLS/SSL (typically port 636)
+- `-cache-enabled`: Enable cache system (default: `true`)
+  - When set to `false`, the cache system is completely disabled and all requests are forwarded directly to the backend LDAP server
 - `-cache-ttl`: Cache TTL duration (default: `15m`)
 - `-connection-timeout`: Backend connection timeout (default: `10s`)
 - `-client-timeout`: Client connection timeout (default: `30s`)
@@ -62,12 +64,15 @@ docker run -p 3389:3389 ldap-proxy -ldap-server ldap.example.com:389
 
 ### Cache Options
 
-The proxy supports two caching backends:
+The proxy supports three caching modes:
 
-1. **In-Memory Cache (Default)**: Stores cache entries in the application's memory. Simple and fast, but cache is lost on restart.
-2. **Redis Cache**: Stores cache entries in Redis. Allows cache to persist across restarts and can be shared across multiple proxy instances.
+1. **Cache Disabled**: Completely disables caching. All requests are forwarded directly to the backend LDAP server with no caching. Use this when you need real-time data or want to minimize memory usage.
+2. **In-Memory Cache (Default)**: Stores cache entries in the application's memory. Simple and fast, but cache is lost on restart.
+3. **Redis Cache**: Stores cache entries in Redis. Allows cache to persist across restarts and can be shared across multiple proxy instances.
 
-To use Redis cache, enable it with the `-redis-enabled` flag or set `redis_enabled: true` in your configuration file. When Redis is enabled, the in-memory cache is automatically disabled.
+To disable caching completely, set `-cache-enabled=false` flag or `cache_enabled: false` in your configuration file.
+
+To use Redis cache, enable it with the `-redis-enabled` flag or set `redis_enabled: true` in your configuration file. When Redis is enabled, the in-memory cache is automatically disabled. Note that `cache_enabled` must be `true` for Redis to work.
 
 ### Configuration File
 
@@ -77,6 +82,7 @@ You can use a YAML configuration file instead of command-line flags:
 # config.yaml
 proxy_addr: ":3389"
 ldap_server: "localhost:389"  # or ldaps://secure.ldap.example.com:636 for TLS
+cache_enabled: true  # Set to false to disable caching completely
 cache_ttl: 15m
 connection_timeout: 10s
 client_timeout: 30s
@@ -106,6 +112,9 @@ Start the proxy using CLI flags:
 
 # Connect to LDAPS (LDAP over TLS) server with in-memory cache
 ./ldap-proxy -proxy-addr :3389 -ldap-server ldaps://secure.example.com:636 -cache-ttl 15m
+
+# Disable cache completely (all requests go directly to backend)
+./ldap-proxy -proxy-addr :3389 -ldap-server ldap.example.com:389 -cache-enabled=false
 
 # Use Redis cache instead of in-memory cache
 ./ldap-proxy -proxy-addr :3389 -ldap-server ldap.example.com:389 -redis-enabled -redis-addr localhost:6379
