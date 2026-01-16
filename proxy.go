@@ -716,6 +716,10 @@ func (p *LDAPProxy) handleCompare(state *ClientState, messageID int64, compareRe
 	}
 
 	entryDN := compareReq.Children[0].Data.String()
+	if entryDN == "" {
+		p.logger.Error().Msg("Compare request with empty entry DN")
+		return p.sendCompareResponse(state, messageID, ldap.LDAPResultProtocolError)
+	}
 
 	// The second child is the AttributeValueAssertion (AVA)
 	ava := compareReq.Children[1]
@@ -725,6 +729,11 @@ func (p *LDAPProxy) handleCompare(state *ClientState, messageID int64, compareRe
 
 	attributeDesc := ava.Children[0].Data.String()
 	assertionValue := ava.Children[1].Data.String()
+
+	if attributeDesc == "" {
+		p.logger.Error().Msg("Compare request with empty attribute name")
+		return p.sendCompareResponse(state, messageID, ldap.LDAPResultProtocolError)
+	}
 
 	p.logger.Info().
 		Str("entry", entryDN).

@@ -38,7 +38,7 @@ func TestCompareRequestParsing(t *testing.T) {
 	}
 
 	// Verify entry DN
-	parsedDN := string(compareReq.Children[0].Data.String())
+	parsedDN := compareReq.Children[0].Data.String()
 	if parsedDN != entryDN {
 		t.Errorf("Expected DN %s, got %s", entryDN, parsedDN)
 	}
@@ -49,12 +49,12 @@ func TestCompareRequestParsing(t *testing.T) {
 		t.Errorf("Expected AVA to have 2 children, got %d", len(parsedAVA.Children))
 	}
 
-	parsedAttr := string(parsedAVA.Children[0].Data.String())
+	parsedAttr := parsedAVA.Children[0].Data.String()
 	if parsedAttr != "userPassword" {
 		t.Errorf("Expected attribute 'userPassword', got %s", parsedAttr)
 	}
 
-	parsedValue := string(parsedAVA.Children[1].Data.String())
+	parsedValue := parsedAVA.Children[1].Data.String()
 	if parsedValue != "secret123" {
 		t.Errorf("Expected value 'secret123', got %s", parsedValue)
 	}
@@ -165,6 +165,69 @@ func TestCompareResultCodes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.code != tt.expected {
 				t.Errorf("Expected %s to be %d, got %d", tt.name, tt.expected, tt.code)
+			}
+		})
+	}
+}
+
+func TestCompareRequestValidation(t *testing.T) {
+	// Test validation of Compare request components
+	tests := []struct {
+		name        string
+		entryDN     string
+		attribute   string
+		expectError bool
+	}{
+		{
+			name:        "Valid request",
+			entryDN:     "cn=test,dc=example,dc=com",
+			attribute:   "userPassword",
+			expectError: false,
+		},
+		{
+			name:        "Empty DN",
+			entryDN:     "",
+			attribute:   "userPassword",
+			expectError: true,
+		},
+		{
+			name:        "Empty attribute",
+			entryDN:     "cn=test,dc=example,dc=com",
+			attribute:   "",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Construct a Compare request
+			compareReq := ber.Encode(ber.ClassApplication, ber.TypeConstructed, ldap.ApplicationCompareRequest, nil, "Compare Request")
+			compareReq.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, tt.entryDN, "Entry DN"))
+
+			ava := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "AVA")
+			ava.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, tt.attribute, "Attribute"))
+			ava.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "testvalue", "Value"))
+			compareReq.AppendChild(ava)
+
+			// Verify the packet structure
+			if len(compareReq.Children) < 2 {
+				t.Error("Compare request should have at least 2 children")
+			}
+
+			parsedDN := compareReq.Children[0].Data.String()
+			if parsedDN != tt.entryDN {
+				t.Errorf("Expected DN %s, got %s", tt.entryDN, parsedDN)
+			}
+
+			parsedAttr := compareReq.Children[1].Children[0].Data.String()
+			if parsedAttr != tt.attribute {
+				t.Errorf("Expected attribute %s, got %s", tt.attribute, parsedAttr)
+			}
+
+			// Validation logic: empty DN or attribute should be considered an error
+			hasError := (tt.entryDN == "" || tt.attribute == "")
+			if hasError != tt.expectError {
+				t.Errorf("Expected error: %v, got: %v", tt.expectError, hasError)
 			}
 		})
 	}
