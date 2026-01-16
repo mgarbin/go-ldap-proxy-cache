@@ -667,10 +667,11 @@ func TestInitLoggerWithFile(t *testing.T) {
 	tmpFile.Close()
 	defer os.Remove(tmpFile.Name())
 
-	logger, err := InitLogger(false, tmpFile.Name())
+	logger, cleanup, err := InitLogger(false, tmpFile.Name())
 	if err != nil {
 		t.Fatalf("Failed to create logger with file: %v", err)
 	}
+	defer cleanup()
 
 	// Write a test log
 	logger.Info().Msg("Test log message")
@@ -688,10 +689,11 @@ func TestInitLoggerWithFile(t *testing.T) {
 
 func TestInitLoggerStdout(t *testing.T) {
 	// Test creating logger with stdout (default)
-	logger, err := InitLogger(false, "")
+	logger, cleanup, err := InitLogger(false, "")
 	if err != nil {
 		t.Fatalf("Failed to create logger with stdout: %v", err)
 	}
+	defer cleanup()
 
 	// Just verify that logger was created successfully
 	logger.Info().Msg("Test log message to stdout")

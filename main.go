@@ -9,13 +9,14 @@ func main() {
 	config := LoadConfig()
 
 	// Initialize logger based on configuration
-	logger, err := InitLogger(config.LogJSON, config.LogFile)
+	logger, cleanup, err := InitLogger(config.LogJSON, config.LogFile)
 	if err != nil {
 		// If we can't initialize the logger, print to stderr and exit
 		// We use fmt.Fprintf instead of logger since logger initialization failed
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
+	defer cleanup() // Ensure log file is closed on exit
 
 	logger.Info().Str("config", config.String()).Msg("Starting LDAP proxy")
 
