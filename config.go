@@ -21,6 +21,7 @@ type Config struct {
 	RedisPassword     string        `yaml:"redis_password"`
 	RedisDB           int           `yaml:"redis_db"`
 	LogJSON           bool          `yaml:"log_json"`
+	LogFile           string        `yaml:"log_file"`
 }
 
 func LoadConfig() *Config {
@@ -33,6 +34,7 @@ func LoadConfig() *Config {
 	var redisAddr string
 	var redisPassword string
 	var redisDB int
+	var logFile string
 
 	// Use pointer for bool to detect if flag was explicitly set
 	cacheEnabled := flag.Bool("cache-enabled", true, "Enable cache system")
@@ -48,6 +50,7 @@ func LoadConfig() *Config {
 	flag.StringVar(&redisAddr, "redis-addr", "", "Redis server address")
 	flag.StringVar(&redisPassword, "redis-password", "", "Redis password")
 	flag.IntVar(&redisDB, "redis-db", -1, "Redis database number")
+	flag.StringVar(&logFile, "log-file", "", "Path to log file (if not set, logs to stdout)")
 
 	flag.Parse()
 
@@ -80,6 +83,7 @@ func LoadConfig() *Config {
 		RedisPassword:     "",
 		RedisDB:           0,
 		LogJSON:           false,
+		LogFile:           "",
 	}
 
 	// Load YAML config if provided (overwrites defaults)
@@ -127,6 +131,9 @@ func LoadConfig() *Config {
 	if redisDB != -1 {
 		config.RedisDB = redisDB
 	}
+	if logFile != "" {
+		config.LogFile = logFile
+	}
 
 	return config
 }
@@ -151,6 +158,7 @@ func loadYAMLConfig(filename string, config *Config) error {
 		RedisPassword     string        `yaml:"redis_password"`
 		RedisDB           int           `yaml:"redis_db"`
 		LogJSON           *bool         `yaml:"log_json"`
+		LogFile           string        `yaml:"log_file"`
 	}
 
 	if err := yaml.Unmarshal(data, &yamlConfig); err != nil {
@@ -194,6 +202,9 @@ func loadYAMLConfig(filename string, config *Config) error {
 	if (yamlConfig.RedisEnabled != nil && *yamlConfig.RedisEnabled) || yamlConfig.RedisDB != 0 {
 		config.RedisDB = yamlConfig.RedisDB
 	}
+	if yamlConfig.LogFile != "" {
+		config.LogFile = yamlConfig.LogFile
+	}
 
 	return nil
 }
@@ -211,6 +222,10 @@ func (c *Config) String() string {
 	if c.LogJSON {
 		logFormat = "JSON"
 	}
-	return fmt.Sprintf("ProxyAddr: %s, LDAPServer: %s, ConnectionTimeout: %s, ClientTimeout: %s, Cache: %s, LogFormat: %s",
-		c.ProxyAddr, c.LDAPServer, c.ConnectionTimeout, c.ClientTimeout, cacheInfo, logFormat)
+	logOutput := "stdout"
+	if c.LogFile != "" {
+		logOutput = c.LogFile
+	}
+	return fmt.Sprintf("ProxyAddr: %s, LDAPServer: %s, ConnectionTimeout: %s, ClientTimeout: %s, Cache: %s, LogFormat: %s, LogOutput: %s",
+		c.ProxyAddr, c.LDAPServer, c.ConnectionTimeout, c.ClientTimeout, cacheInfo, logFormat, logOutput)
 }
