@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"testing"
 	"time"
 
@@ -106,37 +107,14 @@ func TestParseControlsFromSearchRequest(t *testing.T) {
 		t.Fatalf("Failed to create proxy: %v", err)
 	}
 
-	// Create a search request with paging control using go-ldap
-	pagingControl := ldap.NewControlPaging(100)
-	pagingControl.SetCookie([]byte("test-cookie"))
-
-	_ = ldap.NewSearchRequest(
-		"dc=example,dc=com",
-		ldap.ScopeWholeSubtree,
-		ldap.NeverDerefAliases,
-		0,
-		0,
-		false,
-		"(objectClass=*)",
-		[]string{"cn", "mail"},
-		[]ldap.Control{pagingControl},
-	)
-
-	// Manually encode the request similar to what comes over the wire
-	// This is a bit tricky since we need to access the internal packet structure
-	// For the test, we'll just verify the logic works with a simplified case
-
-	// The parseControlsFromSearchRequest function expects a BER packet with controls
-	// For a proper test, we would need to simulate the full LDAP packet structure
-	// Here we're testing that the function exists and doesn't crash
-
-	// Create a minimal search request packet (this is simplified)
-	// In reality, this would come from the wire
-	t.Log("Parse controls function exists and can be called")
-
 	// Test that proxy was created with paging state manager
 	if proxy.pagingState == nil {
 		t.Error("Expected proxy to have paging state manager")
+	}
+
+	// Test that the paging state manager has a context for graceful shutdown
+	if proxy.pagingState.ctx == nil {
+		t.Error("Expected paging state manager to have context")
 	}
 }
 
@@ -188,12 +166,9 @@ func TestGenerateSecureCookie(t *testing.T) {
 		t.Error("Expected unique cookies, got identical values")
 	}
 
-	// Test that cookies are base64 encoded (URL-safe)
-	for _, c := range cookie1 {
-		// Check if character is valid base64 URL encoding
-		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || 
-			(c >= '0' && c <= '9') || c == '-' || c == '_' || c == '=') {
-			t.Errorf("Cookie contains invalid base64 character: %c", c)
-		}
+	// Test that cookies are valid base64 URL encoding
+	_, err = base64.URLEncoding.DecodeString(cookie1)
+	if err != nil {
+		t.Errorf("Cookie is not valid base64 URL encoding: %v", err)
 	}
 }

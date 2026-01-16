@@ -98,8 +98,8 @@ func TestPagingIntegration(t *testing.T) {
 		searchReq.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, 0, "Time Limit"))
 		searchReq.AppendChild(ber.NewBoolean(ber.ClassUniversal, ber.TypePrimitive, ber.TagBoolean, false, "Types Only"))
 
-		// Add a simple filter (equality filter for objectClass=*)
-		filterPacket := ber.Encode(ber.ClassContext, ber.TypeConstructed, 3, nil, "Filter: Present")
+		// Add a simple filter (present filter for objectClass)
+		filterPacket := ber.Encode(ber.ClassContext, ber.TypeConstructed, 7, nil, "Filter: Present")
 		filterPacket.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "objectClass", "Attribute"))
 		searchReq.AppendChild(filterPacket)
 
