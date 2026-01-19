@@ -571,6 +571,10 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 	// Check if this is a continuation of a previous paged search
 	if len(clientPagingControl.Cookie) > 0 {
 		cookieStr := string(clientPagingControl.Cookie)
+		p.logger.Debug().
+			Str("client_cookie", cookieStr).
+			Msg("Processing paging continuation request")
+		
 		if pagingState, ok := p.pagingState.Get(cookieStr); ok {
 			// Verify that the stored credentials match the current session to prevent privilege escalation
 			// Use constant-time comparison to prevent timing attacks
@@ -583,10 +587,26 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 
 			// Restore backend cookie and search parameters from state
 			backendCookie = pagingState.backendCookie
+			p.logger.Debug().
+				Int("backend_cookie_len", len(backendCookie)).
+				Msg("Restored backend cookie from state")
+			
 			// Ensure search parameters match
 			if pagingState.baseDN != baseDN || pagingState.filter != filterStr || pagingState.scope != scope {
 				p.logger.Warn().Msg("Paging parameters mismatch")
 				return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
+			}
+			
+			// Validate attributes match
+			if len(pagingState.attributes) != len(attributes) {
+				p.logger.Warn().Msg("Attributes count mismatch in paging continuation")
+				return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
+			}
+			for i := range attributes {
+				if pagingState.attributes[i] != attributes[i] {
+					p.logger.Warn().Msg("Attributes mismatch in paging continuation")
+					return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
+				}
 			}
 
 			// Mark cookie for deletion after successful search
@@ -596,6 +616,8 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 			p.logger.Warn().Msg("Invalid or expired paging cookie received")
 			return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 		}
+	} else {
+		p.logger.Debug().Msg("First page of paged search")
 	}
 
 	// Query backend with paging control
@@ -617,6 +639,11 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 	}
 
 	// Fetch single page from backend
+	p.logger.Debug().
+		Int("backend_cookie_len", len(backendCookie)).
+		Uint32("page_size", pageSize).
+		Msg("Fetching page from backend")
+	
 	result, err := p.searchBackendSinglePage(ldapConn, baseDN, scope, filterStr, attributes, pageSize, backendCookie)
 	if err != nil {
 		p.logger.Error().Err(err).Str("key", reqKey).Msg("Backend paged search failed")
@@ -662,6 +689,7 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 
 		p.logger.Debug().
 			Int("entries_sent", len(result.Entries)).
+			Int("backend_cookie_len", len(backendPagingControl.Cookie)).
 			Msg("Created paging cookie for next page")
 	} else {
 		// No more results
