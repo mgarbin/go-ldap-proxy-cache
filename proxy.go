@@ -668,7 +668,7 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 			}
 		}
 	}
-	
+
 	if backendPagingControl == nil {
 		p.logger.Debug().Msg("No paging control in backend response")
 	}
