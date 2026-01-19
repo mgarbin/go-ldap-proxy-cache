@@ -89,7 +89,7 @@ func TestPagingIntegration(t *testing.T) {
 		controlsPacket := ber.Encode(ber.ClassContext, ber.TypeConstructed, 0, nil, "Controls")
 		controlsPacket.AppendChild(controlPacket)
 
-		// Create a minimal search request BER packet with controls
+		// Create a minimal search request BER packet
 		searchReq := ber.Encode(ber.ClassApplication, ber.TypeConstructed, 3, nil, "Search Request")
 		searchReq.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, baseDN, "Base DN"))
 		searchReq.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagEnumerated, int64(ldap.ScopeWholeSubtree), "Scope"))
@@ -109,16 +109,19 @@ func TestPagingIntegration(t *testing.T) {
 		attrList.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "mail", "Attribute"))
 		searchReq.AppendChild(attrList)
 
-		// Add the controls as the 9th child (index 8)
-		searchReq.AppendChild(controlsPacket)
+		// Create a full LDAP message with controls
+		ldapMessage := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Message")
+		ldapMessage.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, 1, "Message ID"))
+		ldapMessage.AppendChild(searchReq)
+		ldapMessage.AppendChild(controlsPacket)
 
-		// Parse controls
-		controls := proxy.parseControlsFromSearchRequest(searchReq)
+		// Parse controls from the full LDAP message
+		controls := proxy.parseControlsFromMessage(ldapMessage)
 		if len(controls) != 1 {
 			t.Errorf("Expected 1 control, got %d", len(controls))
-			t.Logf("SearchReq children count: %d", len(searchReq.Children))
-			if len(searchReq.Children) > 8 {
-				t.Logf("Controls packet tag: %d, class: %d", searchReq.Children[8].Tag, searchReq.Children[8].ClassType)
+			t.Logf("LDAP Message children count: %d", len(ldapMessage.Children))
+			if len(ldapMessage.Children) > 2 {
+				t.Logf("Controls packet tag: %d, class: %d", ldapMessage.Children[2].Tag, ldapMessage.Children[2].ClassType)
 			}
 		}
 

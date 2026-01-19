@@ -1,5 +1,6 @@
 # Binary executables
 ldap-proxy
+go-ldap-proxy-cache
 *.exe
 *.dll
 *.so

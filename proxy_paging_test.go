@@ -172,3 +172,58 @@ func TestGenerateSecureCookie(t *testing.T) {
 		t.Errorf("Cookie is not valid base64 URL encoding: %v", err)
 	}
 }
+
+func TestStoreBackendPaging(t *testing.T) {
+	logger := getTestLogger()
+	psm := NewPagingStateManager(logger)
+
+	// Test storing backend paging state
+	cookie := "test-backend-cookie"
+	backendCookie := []byte("backend-cookie-value")
+	baseDN := "dc=example,dc=com"
+	filter := "(objectClass=*)"
+	attributes := []string{"cn", "mail"}
+	scope := 2
+	bindDN := "cn=admin,dc=example,dc=com"
+	bindPwd := "test-password"
+	connectionID := "cn=admin,dc=example,dc=com@127.0.0.1:12345"
+
+	psm.StoreBackendPaging(cookie, backendCookie, baseDN, filter, attributes, scope, bindDN, bindPwd, connectionID)
+
+	state, ok := psm.Get(cookie)
+	if !ok {
+		t.Error("Expected to find backend paging state")
+	}
+
+	if string(state.backendCookie) != string(backendCookie) {
+		t.Errorf("Expected backend cookie %s, got %s", string(backendCookie), string(state.backendCookie))
+	}
+
+	if state.baseDN != baseDN {
+		t.Errorf("Expected baseDN %s, got %s", baseDN, state.baseDN)
+	}
+
+	if state.filter != filter {
+		t.Errorf("Expected filter %s, got %s", filter, state.filter)
+	}
+
+	if len(state.attributes) != len(attributes) {
+		t.Errorf("Expected %d attributes, got %d", len(attributes), len(state.attributes))
+	}
+
+	if state.scope != scope {
+		t.Errorf("Expected scope %d, got %d", scope, state.scope)
+	}
+
+	if state.bindDN != bindDN {
+		t.Errorf("Expected bindDN %s, got %s", bindDN, state.bindDN)
+	}
+
+	if state.bindPwd != bindPwd {
+		t.Errorf("Expected bindPwd %s, got %s", bindPwd, state.bindPwd)
+	}
+
+	if state.connectionID != connectionID {
+		t.Errorf("Expected connectionID %s, got %s", connectionID, state.connectionID)
+	}
+}
