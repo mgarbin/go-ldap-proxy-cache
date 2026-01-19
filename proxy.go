@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -597,7 +598,7 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 			backendCookie = pagingState.backendCookie
 			p.logger.Debug().
 				Int("backend_cookie_len", len(backendCookie)).
-				Str("backend_cookie_hex", fmt.Sprintf("%x", backendCookie)).
+				Str("backend_cookie_hex", hex.EncodeToString(backendCookie)).
 				Msg("Restored backend cookie from state")
 			
 			// Ensure search parameters match
@@ -655,7 +656,7 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 	// Fetch single page from backend
 	p.logger.Debug().
 		Int("backend_cookie_len", len(backendCookie)).
-		Str("backend_cookie_hex", fmt.Sprintf("%x", backendCookie)).
+		Str("backend_cookie_hex", hex.EncodeToString(backendCookie)).
 		Uint32("page_size", pageSize).
 		Msg("Fetching page from backend")
 	
@@ -673,7 +674,7 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 				backendPagingControl = pc
 				p.logger.Debug().
 					Int("backend_cookie_len", len(pc.Cookie)).
-					Str("backend_cookie_hex", fmt.Sprintf("%x", pc.Cookie)).
+					Str("backend_cookie_hex", hex.EncodeToString(pc.Cookie)).
 					Msg("Extracted paging control from backend response")
 				break
 			}
