@@ -51,9 +51,18 @@ type PagingStateManager struct {
 
 // PagingState stores the state for a paged query
 type PagingState struct {
+	// For non-paging client or cached results
 	entries   []*ldap.Entry
 	offset    int
-	createdAt time.Time
+	// For paging: track backend cookie and request parameters
+	backendCookie []byte
+	baseDN        string
+	filter        string
+	attributes    []string
+	scope         int
+	bindDN        string
+	bindPwd       string
+	createdAt     time.Time
 }
 
 // NewPagingStateManager creates a new paging state manager
@@ -98,7 +107,7 @@ func (psm *PagingStateManager) cleanupOldStates() {
 	}
 }
 
-// Store saves paging state with a cookie
+// Store saves paging state with a cookie (for backward compatibility with cached results)
 func (psm *PagingStateManager) Store(cookie string, entries []*ldap.Entry, offset int) {
 	psm.mu.Lock()
 	defer psm.mu.Unlock()
@@ -107,6 +116,23 @@ func (psm *PagingStateManager) Store(cookie string, entries []*ldap.Entry, offse
 		entries:   entries,
 		offset:    offset,
 		createdAt: time.Now(),
+	}
+}
+
+// StoreBackendPaging saves paging state for backend paging with a cookie
+func (psm *PagingStateManager) StoreBackendPaging(cookie string, backendCookie []byte, baseDN, filter string, attributes []string, scope int, bindDN, bindPwd string) {
+	psm.mu.Lock()
+	defer psm.mu.Unlock()
+
+	psm.states[cookie] = &PagingState{
+		backendCookie: backendCookie,
+		baseDN:        baseDN,
+		filter:        filter,
+		attributes:    attributes,
+		scope:         scope,
+		bindDN:        bindDN,
+		bindPwd:       bindPwd,
+		createdAt:     time.Now(),
 	}
 }
 
@@ -392,6 +418,9 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	// Parse controls from the search request
 	controls := p.parseControlsFromSearchRequest(searchReq)
 
+	// Generate a key for logging purposes
+	reqKey := generateCacheKey(baseDN, filterStr, attributes, scope)
+
 	// Check if client requested paging
 	var clientPagingControl *ldap.ControlPaging
 	for _, ctrl := range controls {
@@ -403,10 +432,18 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		}
 	}
 
-	// Generate a key for logging purposes
-	reqKey := generateCacheKey(baseDN, filterStr, attributes, scope)
+	state.mu.Lock()
+	bindDN := state.backendDN
+	bindPwd := state.backendPwd
+	state.mu.Unlock()
 
-	// Get all entries (from cache or backend)
+	// Handle paged search requests differently
+	if clientPagingControl != nil {
+		// Client wants paged results - forward paging to backend
+		return p.handlePagedSearch(state, messageID, baseDN, scope, filterStr, attributes, clientPagingControl, bindDN, bindPwd, reqKey, requestBytes)
+	}
+
+	// Non-paged search: fetch all entries (from cache or backend)
 	var allEntries []*ldap.Entry
 	var fromCache bool
 
@@ -431,11 +468,6 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 			return p.sendSearchDone(state, messageID, ldap.LDAPResultUnavailable)
 		}
 		defer ldapConn.Close()
-
-		state.mu.Lock()
-		bindDN := state.backendDN
-		bindPwd := state.backendPwd
-		state.mu.Unlock()
 
 		if bindDN != "" {
 			if err := ldapConn.Bind(bindDN, bindPwd); err != nil {
@@ -465,73 +497,9 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 			Msg("Retrieved entries from backend")
 	}
 
-	// Now handle paging if client requested it
-	var entriesToSend []*ldap.Entry
-	var responseControl *ldap.ControlPaging
-
-	if clientPagingControl != nil {
-		// Client wants paged results
-		pageSize := int(clientPagingControl.PagingSize)
-
-		var startOffset int
-
-		// Check if this is a continuation of a previous paged search
-		if len(clientPagingControl.Cookie) > 0 {
-			cookieStr := string(clientPagingControl.Cookie)
-			if pagingState, ok := p.pagingState.Get(cookieStr); ok {
-				startOffset = pagingState.offset
-				allEntries = pagingState.entries
-			} else {
-				// Cookie is invalid or expired - log without exposing the actual cookie value
-				p.logger.Warn().Msg("Invalid or expired paging cookie received")
-				return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
-			}
-		}
-
-		// Determine entries to send for this page
-		endOffset := startOffset + pageSize
-		if endOffset > len(allEntries) {
-			endOffset = len(allEntries)
-		}
-		entriesToSend = allEntries[startOffset:endOffset]
-
-		// Prepare response control
-		responseControl = ldap.NewControlPaging(uint32(pageSize))
-
-		// If there are more results, generate a cookie
-		if endOffset < len(allEntries) {
-			// Generate a cryptographically secure random cookie
-			cookie, err := generateSecureCookie()
-			if err != nil {
-				p.logger.Error().Err(err).Msg("Failed to generate paging cookie")
-				return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
-			}
-			responseControl.SetCookie([]byte(cookie))
-
-			// Store the paging state
-			p.pagingState.Store(cookie, allEntries, endOffset)
-
-			p.logger.Debug().
-				Int("offset", endOffset).
-				Int("total", len(allEntries)).
-				Msg("Created paging cookie")
-		} else {
-			// No more results, send empty cookie
-			responseControl.SetCookie([]byte{})
-
-			// Clean up any previous paging state
-			if len(clientPagingControl.Cookie) > 0 {
-				p.pagingState.Delete(string(clientPagingControl.Cookie))
-			}
-		}
-	} else {
-		// Client didn't request paging, send all entries
-		entriesToSend = allEntries
-	}
-
-	// Send the entries
+	// Send all entries for non-paged search
 	var answerBytes int
-	for _, entry := range entriesToSend {
+	for _, entry := range allEntries {
 		entryBytes, err := p.sendSearchEntryWithSize(state, messageID, entry)
 		if err != nil {
 			return err
@@ -539,13 +507,8 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		answerBytes += entryBytes
 	}
 
-	// Send search done with control if paging was requested
-	var doneBytes int
-	if responseControl != nil {
-		doneBytes, err = p.sendSearchDoneWithControl(state, messageID, ldap.LDAPResultSuccess, responseControl)
-	} else {
-		doneBytes, err = p.sendSearchDoneWithSize(state, messageID, ldap.LDAPResultSuccess)
-	}
+	// Send search done
+	doneBytes, err := p.sendSearchDoneWithSize(state, messageID, ldap.LDAPResultSuccess)
 	if err != nil {
 		return err
 	}
@@ -561,12 +524,8 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		Strs("attributes", attributes).
 		Int("request_bytes", requestBytes).
 		Int("answer_bytes", answerBytes).
-		Int("entries_sent", len(entriesToSend)).
+		Int("entries_sent", len(allEntries)).
 		Int("total_entries", len(allEntries))
-
-	if clientPagingControl != nil {
-		logEvent = logEvent.Bool("paged", true).Uint32("page_size", clientPagingControl.PagingSize)
-	}
 
 	if fromCache {
 		logEvent.Msg("Cache hit for search")
@@ -577,6 +536,134 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	return nil
 }
 
+// handlePagedSearch handles search requests with paging control
+func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseDN string, scope int, filterStr string, attributes []string, clientPagingControl *ldap.ControlPaging, bindDN, bindPwd, reqKey string, requestBytes int) error {
+	pageSize := clientPagingControl.PagingSize
+	var backendCookie []byte
+
+	// Check if this is a continuation of a previous paged search
+	if len(clientPagingControl.Cookie) > 0 {
+		cookieStr := string(clientPagingControl.Cookie)
+		if pagingState, ok := p.pagingState.Get(cookieStr); ok {
+			// Restore backend cookie and search parameters from state
+			backendCookie = pagingState.backendCookie
+			// Also restore credentials in case they're needed
+			bindDN = pagingState.bindDN
+			bindPwd = pagingState.bindPwd
+			// Ensure search parameters match
+			if pagingState.baseDN != baseDN || pagingState.filter != filterStr || pagingState.scope != scope {
+				p.logger.Warn().Msg("Paging parameters mismatch")
+				return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
+			}
+		} else {
+			// Cookie is invalid or expired
+			p.logger.Warn().Msg("Invalid or expired paging cookie received")
+			return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
+		}
+
+		// Clean up old paging state
+		p.pagingState.Delete(cookieStr)
+	}
+
+	// Query backend with paging control
+	dialer := &net.Dialer{
+		Timeout: p.config.ConnectionTimeout,
+	}
+	ldapConn, err := ldap.DialURL(ensureLDAPURL(p.config.LDAPServer), ldap.DialWithDialer(dialer))
+	if err != nil {
+		p.logger.Error().Err(err).Str("key", reqKey).Msg("Failed to connect to backend")
+		return p.sendSearchDone(state, messageID, ldap.LDAPResultUnavailable)
+	}
+	defer ldapConn.Close()
+
+	if bindDN != "" {
+		if err := ldapConn.Bind(bindDN, bindPwd); err != nil {
+			p.logger.Error().Err(err).Str("key", reqKey).Msg("Backend bind failed")
+			return p.sendSearchDone(state, messageID, ldap.LDAPResultInvalidCredentials)
+		}
+	}
+
+	// Fetch single page from backend
+	result, err := p.searchBackendSinglePage(ldapConn, baseDN, scope, filterStr, attributes, pageSize, backendCookie)
+	if err != nil {
+		p.logger.Error().Err(err).Str("key", reqKey).Msg("Backend paged search failed")
+		return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
+	}
+
+	// Extract backend's paging control from response
+	var backendPagingControl *ldap.ControlPaging
+	for _, ctrl := range result.Controls {
+		if ctrl.GetControlType() == ldap.ControlTypePaging {
+			if pc, ok := ctrl.(*ldap.ControlPaging); ok {
+				backendPagingControl = pc
+				break
+			}
+		}
+	}
+
+	// Send entries to client
+	var answerBytes int
+	for _, entry := range result.Entries {
+		entryBytes, err := p.sendSearchEntryWithSize(state, messageID, entry)
+		if err != nil {
+			return err
+		}
+		answerBytes += entryBytes
+	}
+
+	// Prepare response control
+	responseControl := ldap.NewControlPaging(pageSize)
+
+	// Check if there are more results from backend
+	if backendPagingControl != nil && len(backendPagingControl.Cookie) > 0 {
+		// More results available - generate new client cookie
+		clientCookie, err := generateSecureCookie()
+		if err != nil {
+			p.logger.Error().Err(err).Msg("Failed to generate paging cookie")
+			return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
+		}
+		responseControl.SetCookie([]byte(clientCookie))
+
+		// Store paging state with backend cookie
+		p.pagingState.StoreBackendPaging(clientCookie, backendPagingControl.Cookie, baseDN, filterStr, attributes, scope, bindDN, bindPwd)
+
+		p.logger.Debug().
+			Int("entries_sent", len(result.Entries)).
+			Msg("Created paging cookie for next page")
+	} else {
+		// No more results
+		responseControl.SetCookie([]byte{})
+		p.logger.Debug().
+			Int("entries_sent", len(result.Entries)).
+			Msg("Last page sent")
+	}
+
+	// Send search done with control
+	doneBytes, err := p.sendSearchDoneWithControl(state, messageID, ldap.LDAPResultSuccess, responseControl)
+	if err != nil {
+		return err
+	}
+	answerBytes += doneBytes
+
+	// Log the search operation
+	p.logger.Info().
+		Str("key", reqKey).
+		Str("host", state.conn.RemoteAddr().String()).
+		Str("base", baseDN).
+		Int("scope", scope).
+		Str("filter", filterStr).
+		Strs("attributes", attributes).
+		Bool("paged", true).
+		Uint32("page_size", pageSize).
+		Int("request_bytes", requestBytes).
+		Int("answer_bytes", answerBytes).
+		Int("entries_sent", len(result.Entries)).
+		Msg("Paged search request")
+
+	return nil
+}
+
+// searchBackendWithPaging fetches ALL pages from backend (for non-paging clients or cache population)
 func (p *LDAPProxy) searchBackendWithPaging(conn *ldap.Conn, baseDN string, scope int, filter string, attributes []string) ([]*ldap.Entry, error) {
 	searchRequest := ldap.NewSearchRequest(
 		baseDN,
@@ -597,6 +684,35 @@ func (p *LDAPProxy) searchBackendWithPaging(conn *ldap.Conn, baseDN string, scop
 
 	p.logger.Info().Int("count", len(result.Entries)).Msg("Retrieved entries from backend")
 	return result.Entries, nil
+}
+
+// searchBackendSinglePage fetches a single page from backend with paging control
+func (p *LDAPProxy) searchBackendSinglePage(conn *ldap.Conn, baseDN string, scope int, filter string, attributes []string, pageSize uint32, cookie []byte) (*ldap.SearchResult, error) {
+	searchRequest := ldap.NewSearchRequest(
+		baseDN,
+		scope,
+		ldap.NeverDerefAliases,
+		0,
+		0,
+		false,
+		filter,
+		attributes,
+		nil,
+	)
+
+	// Add paging control
+	pagingControl := ldap.NewControlPaging(pageSize)
+	if len(cookie) > 0 {
+		pagingControl.SetCookie(cookie)
+	}
+	searchRequest.Controls = append(searchRequest.Controls, pagingControl)
+
+	result, err := conn.Search(searchRequest)
+	if err != nil {
+		return nil, fmt.Errorf("paged search failed: %w", err)
+	}
+
+	return result, nil
 }
 
 func (p *LDAPProxy) sendSearchEntry(state *ClientState, messageID int64, entry *ldap.Entry) error {
