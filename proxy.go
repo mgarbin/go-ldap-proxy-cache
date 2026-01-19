@@ -555,7 +555,7 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 				p.logger.Warn().Msg("Credential mismatch in paging continuation")
 				return p.sendSearchDone(state, messageID, ldap.LDAPResultInsufficientAccessRights)
 			}
-			
+
 			// Restore backend cookie and search parameters from state
 			backendCookie = pagingState.backendCookie
 			// Ensure search parameters match
@@ -563,7 +563,7 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 				p.logger.Warn().Msg("Paging parameters mismatch")
 				return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 			}
-			
+
 			// Mark cookie for deletion after successful search
 			cookieToDelete = cookieStr
 		} else {
