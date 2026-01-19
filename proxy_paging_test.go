@@ -186,8 +186,9 @@ func TestStoreBackendPaging(t *testing.T) {
 	scope := 2
 	bindDN := "cn=admin,dc=example,dc=com"
 	bindPwd := "test-password"
+	connectionID := "cn=admin,dc=example,dc=com@127.0.0.1:12345"
 
-	psm.StoreBackendPaging(cookie, backendCookie, baseDN, filter, attributes, scope, bindDN, bindPwd)
+	psm.StoreBackendPaging(cookie, backendCookie, baseDN, filter, attributes, scope, bindDN, bindPwd, connectionID)
 
 	state, ok := psm.Get(cookie)
 	if !ok {
@@ -220,5 +221,9 @@ func TestStoreBackendPaging(t *testing.T) {
 
 	if state.bindPwd != bindPwd {
 		t.Errorf("Expected bindPwd %s, got %s", bindPwd, state.bindPwd)
+	}
+
+	if state.connectionID != connectionID {
+		t.Errorf("Expected connectionID %s, got %s", connectionID, state.connectionID)
 	}
 }

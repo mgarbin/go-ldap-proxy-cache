@@ -29,6 +29,7 @@ type LDAPProxy struct {
 	cache       CacheInterface
 	logger      zerolog.Logger
 	pagingState *PagingStateManager
+	connPool    *ConnectionPool
 }
 
 type ClientState struct {
@@ -64,7 +65,164 @@ type PagingState struct {
 	scope         int
 	bindDN        string
 	bindPwd       string
+	// For connection pooling: track which connection to reuse
+	connectionID  string
 	createdAt     time.Time
+}
+
+// BackendConnection represents a pooled connection to the backend LDAP server
+type BackendConnection struct {
+	conn      *ldap.Conn
+	bindDN    string
+	lastUsed  time.Time
+	inUse     bool
+	mu        sync.Mutex
+}
+
+// ConnectionPool manages persistent connections to the backend LDAP server
+type ConnectionPool struct {
+	connections map[string]*BackendConnection
+	mu          sync.RWMutex
+	logger      zerolog.Logger
+	config      *Config
+	ctx         context.Context
+	cancel      context.CancelFunc
+}
+
+// NewConnectionPool creates a new connection pool
+func NewConnectionPool(logger zerolog.Logger, config *Config) *ConnectionPool {
+	ctx, cancel := context.WithCancel(context.Background())
+	pool := &ConnectionPool{
+		connections: make(map[string]*BackendConnection),
+		logger:      logger,
+		config:      config,
+		ctx:         ctx,
+		cancel:      cancel,
+	}
+	// Start cleanup goroutine to remove idle connections
+	go pool.cleanupIdleConnections()
+	return pool
+}
+
+// Stop gracefully stops the connection pool
+func (cp *ConnectionPool) Stop() {
+	cp.cancel()
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	
+	// Close all connections
+	for id, conn := range cp.connections {
+		if conn.conn != nil {
+			conn.conn.Close()
+		}
+		delete(cp.connections, id)
+	}
+}
+
+// cleanupIdleConnections periodically removes idle connections
+func (cp *ConnectionPool) cleanupIdleConnections() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-cp.ctx.Done():
+			return
+		case <-ticker.C:
+			cp.mu.Lock()
+			now := time.Now()
+			for id, conn := range cp.connections {
+				// Remove connections idle for more than 5 minutes
+				if !conn.inUse && now.Sub(conn.lastUsed) > 5*time.Minute {
+					conn.mu.Lock()
+					if conn.conn != nil {
+						conn.conn.Close()
+					}
+					conn.mu.Unlock()
+					delete(cp.connections, id)
+					cp.logger.Debug().Str("connection_id", id).Msg("Removed idle connection")
+				}
+			}
+			cp.mu.Unlock()
+		}
+	}
+}
+
+// GetOrCreate gets an existing connection or creates a new one
+func (cp *ConnectionPool) GetOrCreate(connectionID, bindDN, bindPwd string) (*BackendConnection, error) {
+	cp.mu.RLock()
+	conn, exists := cp.connections[connectionID]
+	cp.mu.RUnlock()
+	
+	if exists {
+		conn.mu.Lock()
+		conn.lastUsed = time.Now()
+		conn.inUse = true
+		conn.mu.Unlock()
+		cp.logger.Debug().Str("connection_id", connectionID).Msg("Reusing existing connection")
+		return conn, nil
+	}
+	
+	// Create new connection
+	cp.logger.Debug().Str("connection_id", connectionID).Msg("Creating new backend connection")
+	
+	dialer := &net.Dialer{
+		Timeout: cp.config.ConnectionTimeout,
+	}
+	ldapConn, err := ldap.DialURL(ensureLDAPURL(cp.config.LDAPServer), ldap.DialWithDialer(dialer))
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to backend: %w", err)
+	}
+	
+	if bindDN != "" {
+		if err := ldapConn.Bind(bindDN, bindPwd); err != nil {
+			ldapConn.Close()
+			return nil, fmt.Errorf("backend bind failed: %w", err)
+		}
+	}
+	
+	backendConn := &BackendConnection{
+		conn:     ldapConn,
+		bindDN:   bindDN,
+		lastUsed: time.Now(),
+		inUse:    true,
+	}
+	
+	cp.mu.Lock()
+	cp.connections[connectionID] = backendConn
+	cp.mu.Unlock()
+	
+	return backendConn, nil
+}
+
+// Release marks a connection as no longer in use
+func (cp *ConnectionPool) Release(connectionID string) {
+	cp.mu.RLock()
+	conn, exists := cp.connections[connectionID]
+	cp.mu.RUnlock()
+	
+	if exists {
+		conn.mu.Lock()
+		conn.inUse = false
+		conn.lastUsed = time.Now()
+		conn.mu.Unlock()
+	}
+}
+
+// Remove closes and removes a connection from the pool
+func (cp *ConnectionPool) Remove(connectionID string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	
+	if conn, exists := cp.connections[connectionID]; exists {
+		conn.mu.Lock()
+		if conn.conn != nil {
+			conn.conn.Close()
+		}
+		conn.mu.Unlock()
+		delete(cp.connections, connectionID)
+		cp.logger.Debug().Str("connection_id", connectionID).Msg("Removed connection from pool")
+	}
 }
 
 // NewPagingStateManager creates a new paging state manager
@@ -122,7 +280,7 @@ func (psm *PagingStateManager) Store(cookie string, entries []*ldap.Entry, offse
 }
 
 // StoreBackendPaging saves paging state for backend paging with a cookie
-func (psm *PagingStateManager) StoreBackendPaging(cookie string, backendCookie []byte, baseDN, filter string, attributes []string, scope int, bindDN, bindPwd string) {
+func (psm *PagingStateManager) StoreBackendPaging(cookie string, backendCookie []byte, baseDN, filter string, attributes []string, scope int, bindDN, bindPwd, connectionID string) {
 	psm.mu.Lock()
 	defer psm.mu.Unlock()
 
@@ -148,6 +306,7 @@ func (psm *PagingStateManager) StoreBackendPaging(cookie string, backendCookie [
 		scope:         scope,
 		bindDN:        bindDN,
 		bindPwd:       bindPwd,
+		connectionID:  connectionID,
 		createdAt:     time.Now(),
 	}
 }
@@ -207,6 +366,7 @@ func NewLDAPProxy(config *Config, logger zerolog.Logger) (*LDAPProxy, error) {
 		cache:       cache,
 		logger:      logger,
 		pagingState: NewPagingStateManager(logger),
+		connPool:    NewConnectionPool(logger, config),
 	}, nil
 }
 
@@ -582,6 +742,7 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 	pageSize := clientPagingControl.PagingSize
 	var backendCookie []byte
 	var cookieToDelete string
+	var connectionID string
 
 	// Check if this is a continuation of a previous paged search
 	if len(clientPagingControl.Cookie) > 0 {
@@ -600,12 +761,14 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 				return p.sendSearchDone(state, messageID, ldap.LDAPResultInsufficientAccessRights)
 			}
 
-			// Restore backend cookie and search parameters from state
+			// Restore backend cookie, connection ID and search parameters from state
 			backendCookie = pagingState.backendCookie
+			connectionID = pagingState.connectionID
 			p.logger.Debug().
 				Int("backend_cookie_len", len(backendCookie)).
 				Str("backend_cookie_hex", hex.EncodeToString(backendCookie)).
-				Msg("Restored backend cookie from state")
+				Str("connection_id", connectionID).
+				Msg("Restored backend cookie and connection ID from state")
 			
 			// Ensure search parameters match
 			if pagingState.baseDN != baseDN || pagingState.filter != filterStr || pagingState.scope != scope {
@@ -638,37 +801,34 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 			return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 		}
 	} else {
-		p.logger.Debug().Msg("First page of paged search")
+		// First page - generate new connection ID
+		// Connection ID is based on bind DN + client address to group requests from same client session
+		connectionID = fmt.Sprintf("%s@%s", bindDN, state.conn.RemoteAddr().String())
+		p.logger.Debug().Str("connection_id", connectionID).Msg("First page of paged search")
 	}
 
-	// Query backend with paging control
-	dialer := &net.Dialer{
-		Timeout: p.config.ConnectionTimeout,
-	}
-	ldapConn, err := ldap.DialURL(ensureLDAPURL(p.config.LDAPServer), ldap.DialWithDialer(dialer))
+	// Get or create a pooled connection
+	// This ensures we reuse the same backend connection for continuation requests
+	backendConn, err := p.connPool.GetOrCreate(connectionID, bindDN, bindPwd)
 	if err != nil {
-		p.logger.Error().Err(err).Str("key", reqKey).Msg("Failed to connect to backend")
+		p.logger.Error().Err(err).Str("key", reqKey).Msg("Failed to get backend connection")
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultUnavailable)
 	}
-	defer ldapConn.Close()
+	defer p.connPool.Release(connectionID)
 
-	if bindDN != "" {
-		if err := ldapConn.Bind(bindDN, bindPwd); err != nil {
-			p.logger.Error().Err(err).Str("key", reqKey).Msg("Backend bind failed")
-			return p.sendSearchDone(state, messageID, ldap.LDAPResultInvalidCredentials)
-		}
-	}
-
-	// Fetch single page from backend
+	// Fetch single page from backend using the pooled connection
 	p.logger.Debug().
 		Int("backend_cookie_len", len(backendCookie)).
 		Str("backend_cookie_hex", hex.EncodeToString(backendCookie)).
 		Uint32("page_size", pageSize).
+		Str("connection_id", connectionID).
 		Msg("Fetching page from backend")
 	
-	result, err := p.searchBackendSinglePage(ldapConn, baseDN, scope, filterStr, attributes, pageSize, backendCookie)
+	result, err := p.searchBackendSinglePage(backendConn.conn, baseDN, scope, filterStr, attributes, pageSize, backendCookie)
 	if err != nil {
 		p.logger.Error().Err(err).Str("key", reqKey).Msg("Backend paged search failed")
+		// If the search failed, the connection might be bad - remove it from pool
+		p.connPool.Remove(connectionID)
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 	}
 
@@ -714,19 +874,22 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 		}
 		responseControl.SetCookie([]byte(clientCookie))
 
-		// Store paging state with backend cookie
-		p.pagingState.StoreBackendPaging(clientCookie, backendPagingControl.Cookie, baseDN, filterStr, attributes, scope, bindDN, bindPwd)
+		// Store paging state with backend cookie and connection ID
+		p.pagingState.StoreBackendPaging(clientCookie, backendPagingControl.Cookie, baseDN, filterStr, attributes, scope, bindDN, bindPwd, connectionID)
 
 		p.logger.Debug().
 			Int("entries_sent", len(result.Entries)).
 			Int("backend_cookie_len", len(backendPagingControl.Cookie)).
+			Str("connection_id", connectionID).
 			Msg("Created paging cookie for next page")
 	} else {
-		// No more results
+		// No more results - clean up connection from pool
 		responseControl.SetCookie([]byte{})
+		p.connPool.Remove(connectionID)
 		p.logger.Debug().
 			Int("entries_sent", len(result.Entries)).
-			Msg("Last page sent")
+			Str("connection_id", connectionID).
+			Msg("Last page sent, removed connection from pool")
 	}
 
 	// Send search done with control
