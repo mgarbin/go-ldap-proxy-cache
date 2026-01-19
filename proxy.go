@@ -661,9 +661,16 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 		if ctrl.GetControlType() == ldap.ControlTypePaging {
 			if pc, ok := ctrl.(*ldap.ControlPaging); ok {
 				backendPagingControl = pc
+				p.logger.Debug().
+					Int("backend_cookie_len", len(pc.Cookie)).
+					Msg("Extracted paging control from backend response")
 				break
 			}
 		}
+	}
+	
+	if backendPagingControl == nil {
+		p.logger.Debug().Msg("No paging control in backend response")
 	}
 
 	// Send entries to client
