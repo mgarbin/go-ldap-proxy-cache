@@ -112,9 +112,11 @@ func (cp *ConnectionPool) Stop() {
 	
 	// Close all connections
 	for id, conn := range cp.connections {
+		conn.mu.Lock()
 		if conn.conn != nil {
 			conn.conn.Close()
 		}
+		conn.mu.Unlock()
 		delete(cp.connections, id)
 	}
 }
@@ -406,6 +408,23 @@ func (p *LDAPProxy) Start() error {
 
 		go p.handleConnection(conn)
 	}
+}
+
+// Stop gracefully shuts down the proxy and cleans up resources
+func (p *LDAPProxy) Stop() {
+	p.logger.Info().Msg("Shutting down LDAP proxy")
+	
+	// Stop paging state manager
+	if p.pagingState != nil {
+		p.pagingState.Stop()
+	}
+	
+	// Stop connection pool
+	if p.connPool != nil {
+		p.connPool.Stop()
+	}
+	
+	p.logger.Info().Msg("LDAP proxy shutdown complete")
 }
 
 func (p *LDAPProxy) reportCacheStats() {
@@ -827,8 +846,16 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 	result, err := p.searchBackendSinglePage(backendConn.conn, baseDN, scope, filterStr, attributes, pageSize, backendCookie)
 	if err != nil {
 		p.logger.Error().Err(err).Str("key", reqKey).Msg("Backend paged search failed")
-		// If the search failed, the connection might be bad - remove it from pool
-		p.connPool.Remove(connectionID)
+		// Check if this appears to be a connection error
+		// Network/connection errors suggest the connection is bad and should be removed
+		errStr := err.Error()
+		if strings.Contains(errStr, "connection") || 
+		   strings.Contains(errStr, "EOF") ||
+		   strings.Contains(errStr, "network") ||
+		   strings.Contains(errStr, "timeout") {
+			p.logger.Warn().Str("connection_id", connectionID).Msg("Removing connection due to connection error")
+			p.connPool.Remove(connectionID)
+		}
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 	}
 
