@@ -185,7 +185,7 @@ func TestStoreBackendPaging(t *testing.T) {
 	attributes := []string{"cn", "mail"}
 	scope := 2
 	bindDN := "cn=admin,dc=example,dc=com"
-	bindPwd := "password"
+	bindPwd := "test-password"
 
 	psm.StoreBackendPaging(cookie, backendCookie, baseDN, filter, attributes, scope, bindDN, bindPwd)
 

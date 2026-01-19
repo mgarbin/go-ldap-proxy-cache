@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -547,7 +548,10 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 		cookieStr := string(clientPagingControl.Cookie)
 		if pagingState, ok := p.pagingState.Get(cookieStr); ok {
 			// Verify that the stored credentials match the current session to prevent privilege escalation
-			if pagingState.bindDN != bindDN || pagingState.bindPwd != bindPwd {
+			// Use constant-time comparison to prevent timing attacks
+			dnMatch := subtle.ConstantTimeCompare([]byte(pagingState.bindDN), []byte(bindDN))
+			pwdMatch := subtle.ConstantTimeCompare([]byte(pagingState.bindPwd), []byte(bindPwd))
+			if dnMatch != 1 || pwdMatch != 1 {
 				p.logger.Warn().Msg("Credential mismatch in paging continuation")
 				return p.sendSearchDone(state, messageID, ldap.LDAPResultInsufficientAccessRights)
 			}
