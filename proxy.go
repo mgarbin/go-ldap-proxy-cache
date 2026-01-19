@@ -295,7 +295,7 @@ func (p *LDAPProxy) handleRequest(state *ClientState, packet *ber.Packet) error 
 	case ldap.ApplicationBindRequest:
 		return p.handleBind(state, messageID, protocolOp)
 	case ldap.ApplicationSearchRequest:
-		return p.handleSearch(state, messageID, protocolOp)
+		return p.handleSearch(state, messageID, protocolOp, packet)
 	case ldap.ApplicationUnbindRequest:
 		return p.handleUnbind(state)
 	case ldap.ApplicationCompareRequest:
@@ -353,7 +353,32 @@ func (p *LDAPProxy) handleBind(state *ClientState, messageID int64, bindReq *ber
 	return p.sendBindResponse(state, messageID, ldap.LDAPResultSuccess)
 }
 
+// parseControlsFromMessage extracts controls from LDAP message packet
+func (p *LDAPProxy) parseControlsFromMessage(packet *ber.Packet) []ldap.Control {
+	var controls []ldap.Control
+
+	// Controls are optional and appear as the 3rd child (index 2) of the LDAP message if present
+	// LDAPMessage structure: [messageID, protocolOp, controls (optional)]
+	if len(packet.Children) > 2 {
+		controlsPacket := packet.Children[2]
+
+		// Controls are context-specific class with tag 0
+		if controlsPacket.ClassType == ber.ClassContext && controlsPacket.Tag == 0 {
+			for _, ctrlPacket := range controlsPacket.Children {
+				if ctrl, err := ldap.DecodeControl(ctrlPacket); err == nil {
+					controls = append(controls, ctrl)
+				}
+			}
+		}
+	}
+
+	return controls
+}
+
 // parseControlsFromSearchRequest extracts controls from LDAP search request packet
+// Deprecated: This function incorrectly tries to parse controls from the SearchRequest.
+// Controls are in the parent LDAP message, not in the SearchRequest.
+// Use parseControlsFromMessage instead.
 func (p *LDAPProxy) parseControlsFromSearchRequest(searchReq *ber.Packet) []ldap.Control {
 	var controls []ldap.Control
 
@@ -390,7 +415,7 @@ func (p *LDAPProxy) sendBindResponse(state *ClientState, messageID int64, result
 	return err
 }
 
-func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq *ber.Packet) error {
+func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq *ber.Packet, fullPacket *ber.Packet) error {
 	if len(searchReq.Children) < 7 {
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultProtocolError)
 	}
@@ -416,8 +441,8 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultProtocolError)
 	}
 
-	// Parse controls from the search request
-	controls := p.parseControlsFromSearchRequest(searchReq)
+	// Parse controls from the full LDAP message packet
+	controls := p.parseControlsFromMessage(fullPacket)
 
 	// Generate a key for logging purposes
 	reqKey := generateCacheKey(baseDN, filterStr, attributes, scope)
