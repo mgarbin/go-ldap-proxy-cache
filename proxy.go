@@ -597,14 +597,19 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 				return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 			}
 			
-			// Validate attributes match
+			// Validate attributes match (order-independent comparison)
 			if len(pagingState.attributes) != len(attributes) {
 				p.logger.Warn().Msg("Attributes count mismatch in paging continuation")
 				return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 			}
-			for i := range attributes {
-				if pagingState.attributes[i] != attributes[i] {
-					p.logger.Warn().Msg("Attributes mismatch in paging continuation")
+			// Create a map for order-independent comparison
+			attrMap := make(map[string]bool, len(pagingState.attributes))
+			for _, attr := range pagingState.attributes {
+				attrMap[attr] = true
+			}
+			for _, attr := range attributes {
+				if !attrMap[attr] {
+					p.logger.Warn().Str("missing_attr", attr).Msg("Attributes mismatch in paging continuation")
 					return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 				}
 			}
