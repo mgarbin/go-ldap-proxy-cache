@@ -55,8 +55,8 @@ type PagingStateManager struct {
 // PagingState stores the state for a paged query
 type PagingState struct {
 	// For non-paging client or cached results
-	entries   []*ldap.Entry
-	offset    int
+	entries []*ldap.Entry
+	offset  int
 	// For paging: track backend cookie and request parameters
 	backendCookie []byte
 	baseDN        string
@@ -66,17 +66,17 @@ type PagingState struct {
 	bindDN        string
 	bindPwd       string
 	// For connection pooling: track which connection to reuse
-	connectionID  string
-	createdAt     time.Time
+	connectionID string
+	createdAt    time.Time
 }
 
 // BackendConnection represents a pooled connection to the backend LDAP server
 type BackendConnection struct {
-	conn      *ldap.Conn
-	bindDN    string
-	lastUsed  time.Time
-	inUse     bool
-	mu        sync.Mutex
+	conn     *ldap.Conn
+	bindDN   string
+	lastUsed time.Time
+	inUse    bool
+	mu       sync.Mutex
 }
 
 // ConnectionPool manages persistent connections to the backend LDAP server
@@ -109,7 +109,7 @@ func (cp *ConnectionPool) Stop() {
 	cp.cancel()
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
-	
+
 	// Close all connections
 	for id, conn := range cp.connections {
 		conn.mu.Lock()
@@ -125,7 +125,7 @@ func (cp *ConnectionPool) Stop() {
 func (cp *ConnectionPool) cleanupIdleConnections() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-cp.ctx.Done():
@@ -155,7 +155,7 @@ func (cp *ConnectionPool) GetOrCreate(connectionID, bindDN, bindPwd string) (*Ba
 	cp.mu.RLock()
 	conn, exists := cp.connections[connectionID]
 	cp.mu.RUnlock()
-	
+
 	if exists {
 		conn.mu.Lock()
 		conn.lastUsed = time.Now()
@@ -164,10 +164,10 @@ func (cp *ConnectionPool) GetOrCreate(connectionID, bindDN, bindPwd string) (*Ba
 		cp.logger.Debug().Str("connection_id", connectionID).Msg("Reusing existing connection")
 		return conn, nil
 	}
-	
+
 	// Create new connection
 	cp.logger.Debug().Str("connection_id", connectionID).Msg("Creating new backend connection")
-	
+
 	dialer := &net.Dialer{
 		Timeout: cp.config.ConnectionTimeout,
 	}
@@ -175,25 +175,25 @@ func (cp *ConnectionPool) GetOrCreate(connectionID, bindDN, bindPwd string) (*Ba
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to backend: %w", err)
 	}
-	
+
 	if bindDN != "" {
 		if err := ldapConn.Bind(bindDN, bindPwd); err != nil {
 			ldapConn.Close()
 			return nil, fmt.Errorf("backend bind failed: %w", err)
 		}
 	}
-	
+
 	backendConn := &BackendConnection{
 		conn:     ldapConn,
 		bindDN:   bindDN,
 		lastUsed: time.Now(),
 		inUse:    true,
 	}
-	
+
 	cp.mu.Lock()
 	cp.connections[connectionID] = backendConn
 	cp.mu.Unlock()
-	
+
 	return backendConn, nil
 }
 
@@ -202,7 +202,7 @@ func (cp *ConnectionPool) Release(connectionID string) {
 	cp.mu.RLock()
 	conn, exists := cp.connections[connectionID]
 	cp.mu.RUnlock()
-	
+
 	if exists {
 		conn.mu.Lock()
 		conn.inUse = false
@@ -215,7 +215,7 @@ func (cp *ConnectionPool) Release(connectionID string) {
 func (cp *ConnectionPool) Remove(connectionID string) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
-	
+
 	if conn, exists := cp.connections[connectionID]; exists {
 		conn.mu.Lock()
 		if conn.conn != nil {
@@ -413,17 +413,17 @@ func (p *LDAPProxy) Start() error {
 // Stop gracefully shuts down the proxy and cleans up resources
 func (p *LDAPProxy) Stop() {
 	p.logger.Info().Msg("Shutting down LDAP proxy")
-	
+
 	// Stop paging state manager
 	if p.pagingState != nil {
 		p.pagingState.Stop()
 	}
-	
+
 	// Stop connection pool
 	if p.connPool != nil {
 		p.connPool.Stop()
 	}
-	
+
 	p.logger.Info().Msg("LDAP proxy shutdown complete")
 }
 
@@ -666,6 +666,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 	// Non-paged search: fetch all entries (from cache or backend)
 	var allEntries []*ldap.Entry
 	var fromCache bool
+	var durationMilliseconds int64 = 0
 
 	if cachedData, found := p.cache.Get(baseDN, filterStr, attributes, scope); found {
 		allEntries = cachedData.([]*ldap.Entry)
@@ -708,7 +709,7 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		// End time for elapsed calculation
 		endDate := time.Now()
 		duration := endDate.Sub(startDate)
-		durationMilliseconds := duration.Milliseconds()
+		durationMilliseconds = duration.Milliseconds()
 
 		p.logger.Debug().
 			Str("key", reqKey).
@@ -745,7 +746,8 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 		Int("request_bytes", requestBytes).
 		Int("answer_bytes", answerBytes).
 		Int("entries_sent", len(allEntries)).
-		Int("total_entries", len(allEntries))
+		Int("total_entries", len(allEntries)).
+		Int64("elapsed_ms", durationMilliseconds)
 
 	if fromCache {
 		logEvent.Msg("Cache hit for search")
@@ -769,7 +771,7 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 		p.logger.Debug().
 			Str("client_cookie", cookieStr).
 			Msg("Processing paging continuation request")
-		
+
 		if pagingState, ok := p.pagingState.Get(cookieStr); ok {
 			// Verify that the stored credentials match the current session to prevent privilege escalation
 			// Use constant-time comparison to prevent timing attacks
@@ -788,13 +790,13 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 				Str("backend_cookie_hex", hex.EncodeToString(backendCookie)).
 				Str("connection_id", connectionID).
 				Msg("Restored backend cookie and connection ID from state")
-			
+
 			// Ensure search parameters match
 			if pagingState.baseDN != baseDN || pagingState.filter != filterStr || pagingState.scope != scope {
 				p.logger.Warn().Msg("Paging parameters mismatch")
 				return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 			}
-			
+
 			// Validate attributes match (order-independent comparison)
 			if len(pagingState.attributes) != len(attributes) {
 				p.logger.Warn().Msg("Attributes count mismatch in paging continuation")
@@ -842,22 +844,26 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 		Uint32("page_size", pageSize).
 		Str("connection_id", connectionID).
 		Msg("Fetching page from backend")
-	
+
+	startDate := time.Now()
 	result, err := p.searchBackendSinglePage(backendConn.conn, baseDN, scope, filterStr, attributes, pageSize, backendCookie)
 	if err != nil {
 		p.logger.Error().Err(err).Str("key", reqKey).Msg("Backend paged search failed")
 		// Check if this appears to be a connection error
 		// Network/connection errors suggest the connection is bad and should be removed
 		errStr := err.Error()
-		if strings.Contains(errStr, "connection") || 
-		   strings.Contains(errStr, "EOF") ||
-		   strings.Contains(errStr, "network") ||
-		   strings.Contains(errStr, "timeout") {
+		if strings.Contains(errStr, "connection") ||
+			strings.Contains(errStr, "EOF") ||
+			strings.Contains(errStr, "network") ||
+			strings.Contains(errStr, "timeout") {
 			p.logger.Warn().Str("connection_id", connectionID).Msg("Removing connection due to connection error")
 			p.connPool.Remove(connectionID)
 		}
 		return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 	}
+	endDate := time.Now()
+	duration := endDate.Sub(startDate)
+	durationMilliseconds := duration.Milliseconds()
 
 	// Extract backend's paging control from response
 	var backendPagingControl *ldap.ControlPaging
@@ -944,6 +950,7 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 		Int("request_bytes", requestBytes).
 		Int("answer_bytes", answerBytes).
 		Int("entries_sent", len(result.Entries)).
+		Int64("elapsed_ms", durationMilliseconds).
 		Msg("Paged search request")
 
 	return nil
