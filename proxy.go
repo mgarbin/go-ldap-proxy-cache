@@ -578,10 +578,6 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 }
 
 func (p *LDAPProxy) searchBackendWithPaging(conn *ldap.Conn, baseDN string, scope int, filter string, attributes []string) ([]*ldap.Entry, error) {
-	var allEntries []*ldap.Entry
-
-	pagingControl := ldap.NewControlPaging(ldapPageSize)
-
 	searchRequest := ldap.NewSearchRequest(
 		baseDN,
 		scope,
@@ -591,36 +587,16 @@ func (p *LDAPProxy) searchBackendWithPaging(conn *ldap.Conn, baseDN string, scop
 		false,
 		filter,
 		attributes,
-		[]ldap.Control{pagingControl},
+		nil,
 	)
 
-	for {
-		result, err := conn.Search(searchRequest)
-		if err != nil {
-			return nil, fmt.Errorf("search failed: %w", err)
-		}
-
-		allEntries = append(allEntries, result.Entries...)
-
-		// Check if there are more pages to fetch
-		pagingResult := ldap.FindControl(result.Controls, ldap.ControlTypePaging)
-		if pagingResult == nil {
-			break
-		}
-
-		currentPaging, ok := pagingResult.(*ldap.ControlPaging)
-		if !ok || len(currentPaging.Cookie) == 0 {
-			break
-		}
-
-		// Set up the next page request with the cookie from the current page
-		nextPageControl := ldap.NewControlPaging(ldapPageSize)
-		nextPageControl.SetCookie(currentPaging.Cookie)
-		searchRequest.Controls = []ldap.Control{nextPageControl}
+	result, err := conn.SearchWithPaging(searchRequest, ldapPageSize)
+	if err != nil {
+		return nil, fmt.Errorf("search failed: %w", err)
 	}
 
-	p.logger.Info().Int("count", len(allEntries)).Msg("Retrieved entries from backend")
-	return allEntries, nil
+	p.logger.Info().Int("count", len(result.Entries)).Msg("Retrieved entries from backend")
+	return result.Entries, nil
 }
 
 func (p *LDAPProxy) sendSearchEntry(state *ClientState, messageID int64, entry *ldap.Entry) error {
