@@ -125,11 +125,19 @@ func (psm *PagingStateManager) StoreBackendPaging(cookie string, backendCookie [
 	psm.mu.Lock()
 	defer psm.mu.Unlock()
 
+	// Make a copy of the backend cookie to avoid reference issues
+	cookieCopy := make([]byte, len(backendCookie))
+	copy(cookieCopy, backendCookie)
+
+	// Make a copy of attributes slice to avoid reference issues
+	attrCopy := make([]string, len(attributes))
+	copy(attrCopy, attributes)
+
 	psm.states[cookie] = &PagingState{
-		backendCookie: backendCookie,
+		backendCookie: cookieCopy,
 		baseDN:        baseDN,
 		filter:        filter,
-		attributes:    attributes,
+		attributes:    attrCopy,
 		scope:         scope,
 		bindDN:        bindDN,
 		bindPwd:       bindPwd,
@@ -589,6 +597,7 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 			backendCookie = pagingState.backendCookie
 			p.logger.Debug().
 				Int("backend_cookie_len", len(backendCookie)).
+				Str("backend_cookie_hex", fmt.Sprintf("%x", backendCookie)).
 				Msg("Restored backend cookie from state")
 			
 			// Ensure search parameters match
@@ -646,6 +655,7 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 	// Fetch single page from backend
 	p.logger.Debug().
 		Int("backend_cookie_len", len(backendCookie)).
+		Str("backend_cookie_hex", fmt.Sprintf("%x", backendCookie)).
 		Uint32("page_size", pageSize).
 		Msg("Fetching page from backend")
 	
@@ -663,6 +673,7 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 				backendPagingControl = pc
 				p.logger.Debug().
 					Int("backend_cookie_len", len(pc.Cookie)).
+					Str("backend_cookie_hex", fmt.Sprintf("%x", pc.Cookie)).
 					Msg("Extracted paging control from backend response")
 				break
 			}
