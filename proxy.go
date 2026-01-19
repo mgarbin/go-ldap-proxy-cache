@@ -540,29 +540,33 @@ func (p *LDAPProxy) handleSearch(state *ClientState, messageID int64, searchReq 
 func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseDN string, scope int, filterStr string, attributes []string, clientPagingControl *ldap.ControlPaging, bindDN, bindPwd, reqKey string, requestBytes int) error {
 	pageSize := clientPagingControl.PagingSize
 	var backendCookie []byte
+	var cookieToDelete string
 
 	// Check if this is a continuation of a previous paged search
 	if len(clientPagingControl.Cookie) > 0 {
 		cookieStr := string(clientPagingControl.Cookie)
 		if pagingState, ok := p.pagingState.Get(cookieStr); ok {
+			// Verify that the stored credentials match the current session to prevent privilege escalation
+			if pagingState.bindDN != bindDN || pagingState.bindPwd != bindPwd {
+				p.logger.Warn().Msg("Credential mismatch in paging continuation")
+				return p.sendSearchDone(state, messageID, ldap.LDAPResultInsufficientAccessRights)
+			}
+			
 			// Restore backend cookie and search parameters from state
 			backendCookie = pagingState.backendCookie
-			// Also restore credentials in case they're needed
-			bindDN = pagingState.bindDN
-			bindPwd = pagingState.bindPwd
 			// Ensure search parameters match
 			if pagingState.baseDN != baseDN || pagingState.filter != filterStr || pagingState.scope != scope {
 				p.logger.Warn().Msg("Paging parameters mismatch")
 				return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 			}
+			
+			// Mark cookie for deletion after successful search
+			cookieToDelete = cookieStr
 		} else {
 			// Cookie is invalid or expired
 			p.logger.Warn().Msg("Invalid or expired paging cookie received")
 			return p.sendSearchDone(state, messageID, ldap.LDAPResultOperationsError)
 		}
-
-		// Clean up old paging state
-		p.pagingState.Delete(cookieStr)
 	}
 
 	// Query backend with paging control
@@ -644,6 +648,11 @@ func (p *LDAPProxy) handlePagedSearch(state *ClientState, messageID int64, baseD
 		return err
 	}
 	answerBytes += doneBytes
+
+	// Clean up old paging state after successful search
+	if cookieToDelete != "" {
+		p.pagingState.Delete(cookieToDelete)
+	}
 
 	// Log the search operation
 	p.logger.Info().
