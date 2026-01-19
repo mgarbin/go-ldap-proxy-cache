@@ -127,12 +127,18 @@ func (psm *PagingStateManager) StoreBackendPaging(cookie string, backendCookie [
 	defer psm.mu.Unlock()
 
 	// Make a copy of the backend cookie to avoid reference issues
-	cookieCopy := make([]byte, len(backendCookie))
-	copy(cookieCopy, backendCookie)
+	var cookieCopy []byte
+	if len(backendCookie) > 0 {
+		cookieCopy = make([]byte, len(backendCookie))
+		copy(cookieCopy, backendCookie)
+	}
 
 	// Make a copy of attributes slice to avoid reference issues
-	attrCopy := make([]string, len(attributes))
-	copy(attrCopy, attributes)
+	var attrCopy []string
+	if len(attributes) > 0 {
+		attrCopy = make([]string, len(attributes))
+		copy(attrCopy, attributes)
+	}
 
 	psm.states[cookie] = &PagingState{
 		backendCookie: cookieCopy,
