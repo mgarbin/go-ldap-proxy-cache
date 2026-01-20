@@ -12,7 +12,7 @@ import (
 // Returns a zerolog.Logger instance configured for either JSON or console output
 // If logFile is specified, logs are written to that file; otherwise, logs go to stdout
 // Returns a cleanup function that should be called when done (e.g., defer cleanup())
-func InitLogger(logJSON bool, logFile string) (zerolog.Logger, func(), error) {
+func InitLogger(logJSON bool, logFile string, logColor bool) (zerolog.Logger, func(), error) {
 	var writer io.Writer
 	cleanup := func() {} // Default no-op cleanup
 
@@ -40,5 +40,5 @@ func InitLogger(logJSON bool, logFile string) (zerolog.Logger, func(), error) {
 		return zerolog.New(writer).With().Timestamp().Logger(), cleanup, nil
 	}
 	// Console output with human-readable format
-	return zerolog.New(zerolog.ConsoleWriter{Out: writer, TimeFormat: "15:04:05"}).With().Timestamp().Logger(), cleanup, nil
+	return zerolog.New(zerolog.ConsoleWriter{Out: writer, TimeFormat: "15:04:05", NoColor: !logColor}).With().Timestamp().Logger(), cleanup, nil
 }

@@ -9,7 +9,7 @@ func main() {
 	config := LoadConfig()
 
 	// Initialize logger based on configuration
-	logger, cleanup, err := InitLogger(config.LogJSON, config.LogFile)
+	logger, cleanup, err := InitLogger(config.LogJSON, config.LogFile, config.LogColor)
 	if err != nil {
 		// If we can't initialize the logger, print to stderr and exit
 		// We use fmt.Fprintf instead of logger since logger initialization failed

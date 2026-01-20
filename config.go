@@ -22,6 +22,7 @@ type Config struct {
 	RedisDB           int           `yaml:"redis_db"`
 	LogJSON           bool          `yaml:"log_json"`
 	LogFile           string        `yaml:"log_file"`
+	LogColor          bool          `yaml:"log_color"`
 }
 
 func LoadConfig() *Config {
@@ -40,6 +41,7 @@ func LoadConfig() *Config {
 	cacheEnabled := flag.Bool("cache-enabled", true, "Enable cache system")
 	redisEnabled := flag.Bool("redis-enabled", false, "Enable Redis cache")
 	logJSON := flag.Bool("log-json", false, "Enable JSON logging")
+	logColor := flag.Bool("log-color", false, "Enable colored logs")
 
 	flag.StringVar(&configFile, "config", "", "Path to YAML configuration file")
 	flag.StringVar(&proxyAddr, "proxy-addr", "", "Proxy listen address")
@@ -58,6 +60,8 @@ func LoadConfig() *Config {
 	cacheEnabledSet := false
 	redisEnabledSet := false
 	logJSONSet := false
+	logColorSet := false
+
 	flag.Visit(func(f *flag.Flag) {
 		if f.Name == "cache-enabled" {
 			cacheEnabledSet = true
@@ -67,6 +71,9 @@ func LoadConfig() *Config {
 		}
 		if f.Name == "log-json" {
 			logJSONSet = true
+		}
+		if f.Name == "log-color" {
+			logColorSet = true
 		}
 	})
 
@@ -84,6 +91,7 @@ func LoadConfig() *Config {
 		RedisDB:           0,
 		LogJSON:           false,
 		LogFile:           "",
+		LogColor:          false,
 	}
 
 	// Load YAML config if provided (overwrites defaults)
@@ -122,6 +130,9 @@ func LoadConfig() *Config {
 	if logJSONSet {
 		config.LogJSON = *logJSON
 	}
+	if logColorSet {
+		config.LogColor = *logColor
+	}
 	if redisAddr != "" {
 		config.RedisAddr = redisAddr
 	}
@@ -159,6 +170,7 @@ func loadYAMLConfig(filename string, config *Config) error {
 		RedisDB           int           `yaml:"redis_db"`
 		LogJSON           *bool         `yaml:"log_json"`
 		LogFile           string        `yaml:"log_file"`
+		LogColor          *bool         `yaml:"log_color"`
 	}
 
 	if err := yaml.Unmarshal(data, &yamlConfig); err != nil {
@@ -204,6 +216,9 @@ func loadYAMLConfig(filename string, config *Config) error {
 	}
 	if yamlConfig.LogFile != "" {
 		config.LogFile = yamlConfig.LogFile
+	}
+	if yamlConfig.LogColor != nil {
+		config.LogColor = *yamlConfig.LogColor
 	}
 
 	return nil
